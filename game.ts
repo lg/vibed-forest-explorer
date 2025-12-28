@@ -50,13 +50,11 @@ interface InputState {
   right: boolean;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  z: number;
-  vx: number;
-  vy: number;
-  life: number;
+interface Cloud {
+  mesh: THREE.Group;
+  speed: number;
+  initialX: number;
+  amplitude: number;
 }
 
 // Simple orbit controls state
@@ -135,12 +133,13 @@ let isMoving = false;
 let chopCooldown = 0;
 
 let highlightMesh: THREE.LineLoop;
-let particles: Particle[] = [];
-let particlesMesh: THREE.Points;
+let pollenParticles: PollenParticle[] = [];
+let pollenSprites: THREE.Sprite[] = [];
 
 let waterTiles: THREE.Mesh[] = [];
 let flowerMeshes: THREE.Group[] = [];
 let fallingTrees: Decoration[] = [];
+let clouds: Cloud[] = [];
 
 let fps = 0;
 let fpsElement: HTMLElement;
@@ -602,6 +601,41 @@ function createPlayerMesh(): THREE.Group {
   return player;
 }
 
+function createCloudMesh(): THREE.Group {
+  const cloud = new THREE.Group();
+
+  const cloudMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 1,
+    flatShading: true,
+    transparent: true,
+    opacity: 0.4
+  });
+
+  const numPuffs = 6 + Math.floor(Math.random() * 6);
+  const puffPositions: { x: number; y: number; z: number; scale: number }[] = [];
+
+  for (let i = 0; i < numPuffs; i++) {
+    puffPositions.push({
+      x: (Math.random() - 0.5) * 3,
+      y: (Math.random() - 0.5) * 0.6,
+      z: (Math.random() - 0.5) * 1.5,
+      scale: 0.6 + Math.random() * 0.6
+    });
+  }
+
+  puffPositions.forEach((puff) => {
+    const geometry = new THREE.SphereGeometry(puff.scale, 8, 6);
+    const mesh = new THREE.Mesh(geometry, cloudMaterial);
+    mesh.position.set(puff.x, puff.y, puff.z);
+    cloud.add(mesh);
+  });
+
+  cloud.scale.set(3 + Math.random() * 1, 1.2 + Math.random() * 0.4, 2 + Math.random() * 0.8);
+
+  return cloud;
+}
+
 // ============================================================================
 // WORLD GENERATION
 // ============================================================================
@@ -1057,82 +1091,133 @@ function animateFlowers(time: number): void {
   });
 }
 
+function animateClouds(time: number): void {
+  clouds.forEach((cloud) => {
+    const offset = Math.sin(time * 0.001 * cloud.speed) * cloud.amplitude;
+    cloud.mesh.position.x = cloud.initialX + offset;
+  });
+}
+
 // ============================================================================
 // PARTICLES
 // ============================================================================
 
-function initParticles(): void {
-  particles = [];
-  for (let i = 0; i < 40; i++) {
-    particles.push({
-      x: Math.random() * WORLD_SIZE,
-      y: Math.random() * WORLD_SIZE,
-      z: Math.random() * 5 + 1,
-      vx: (Math.random() - 0.5) * 0.001,
-      vy: (Math.random() - 0.5) * 0.001,
-      life: Math.random()
-    });
-  }
+const POLLEN_COLORS = [0xfffacd, 0xfff8dc, 0xfffaf0, 0xfffff0, 0xfff5ee, 0xfff, 0xfffdd0];
+const POLLEN_COUNT = 250;
 
-  const positions = new Float32Array(particles.length * 3);
-  particles.forEach((p, i) => {
-    positions[i * 3] = p.x;
-    positions[i * 3 + 1] = p.z;
-    positions[i * 3 + 2] = p.y;
-  });
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-  const material = new THREE.PointsMaterial({
-    color: 0xffffff,
-    size: 0.15,
-    transparent: true,
-    opacity: 0.6,
-    sizeAttenuation: true
-  });
-
-  particlesMesh = new THREE.Points(geometry, material);
-  scene.add(particlesMesh);
+function createPollenParticle(): PollenParticle {
+  const color = POLLEN_COLORS[Math.floor(Math.random() * POLLEN_COLORS.length)];
+  return {
+    x: Math.random() * WORLD_SIZE,
+    y: Math.random() * WORLD_SIZE,
+    z: Math.random() * 3 + 0.5,
+    vx: (Math.random() - 0.5) * 0.002,
+    vy: (Math.random() - 0.5) * 0.002,
+    vz: Math.random() * 0.001 + 0.0005,
+    life: Math.random(),
+    maxLife: 3 + Math.random() * 4,
+    color,
+    size: 0.3 + Math.random() * 0.3,
+    phase: Math.random() * Math.PI * 2
+  };
 }
 
-function updateParticles(deltaTime: number): void {
-  const positions = particlesMesh.geometry.attributes.position as THREE.BufferAttribute;
+function initParticles(): void {
+  pollenParticles = [];
+  pollenSprites = [];
 
-  particles.forEach((p, i) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(16, 16, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+
+  for (let i = 0; i < POLLEN_COUNT; i++) {
+    const particle = createPollenParticle();
+    pollenParticles.push(particle);
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      color: particle.color,
+      transparent: true,
+      opacity: 0.2 + Math.random() * 0.7,
+      depthWrite: false
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(particle.x, particle.z, particle.y);
+    sprite.scale.set(0.03, 0.03, 1.0);
+
+    scene.add(sprite);
+    pollenSprites.push(sprite);
+  }
+}
+
+function updateParticles(deltaTime: number, time: number): void {
+  pollenParticles.forEach((p, i) => {
     p.x += p.vx * deltaTime;
     p.y += p.vy * deltaTime;
-    p.life -= 0.0003 * deltaTime;
+    p.z += p.vz * deltaTime + Math.sin(time * 0.001 + p.phase) * 0.0005;
+    p.life += deltaTime * 0.001;
 
-    if (p.life <= 0) {
-      p.x = Math.random() * WORLD_SIZE;
-      p.y = Math.random() * WORLD_SIZE;
-      p.z = Math.random() * 5 + 1;
-      p.life = 1;
+    if (p.life >= p.maxLife) {
+      const newP = createPollenParticle();
+      p.x = newP.x;
+      p.y = newP.y;
+      p.z = newP.z;
+      p.vx = newP.vx;
+      p.vy = newP.vy;
+      p.vz = newP.vz;
+      p.life = 0;
     }
 
-    positions.setXYZ(i, p.x, p.z, p.y);
+    pollenSprites[i].position.set(p.x, p.z, p.y);
   });
+}
 
-  positions.needsUpdate = true;
+function initClouds(): void {
+  const cloudCount = 2 + Math.floor(Math.random() * 2);
+
+  for (let i = 0; i < cloudCount; i++) {
+    const cloud = createCloudMesh();
+    const x = Math.random() * WORLD_SIZE * 1.5 - WORLD_SIZE * 0.25;
+    const z = Math.random() * WORLD_SIZE;
+    cloud.position.set(x, 2 + Math.random() * 2.5, z);
+
+    scene.add(cloud);
+
+    clouds.push({
+      mesh: cloud,
+      speed: 0.3 + Math.random() * 0.4,
+      initialX: x,
+      amplitude: 1 + Math.random() * 2
+    });
+  }
 }
 
 // ============================================================================
 // GAME LOOP
 // ============================================================================
 
-function update(deltaTime: number): void {
+function update(deltaTime: number, time: number): void {
   if (chopCooldown > 0) {
     chopCooldown -= deltaTime;
   }
   updatePlayer(deltaTime);
   updateFallingTrees(deltaTime);
-  updateParticles(deltaTime);
+  updateParticles(deltaTime, time);
 }
 
 function render(time: number): void {
   animateWater(time);
   animateFlowers(time);
+  animateClouds(time);
 
   updateOrbitControls();
   renderer.render(scene, camera);
@@ -1148,7 +1233,7 @@ function gameLoop(currentTime: number): void {
   fps = 1000 / (currentTime - lastTime);
   lastTime = currentTime;
 
-  update(deltaTime);
+  update(deltaTime, currentTime);
   render(currentTime);
 
   requestAnimationFrame(gameLoop);
@@ -1195,6 +1280,9 @@ async function init(): Promise<void> {
 
   // Initialize particles
   initParticles();
+
+  // Initialize clouds
+  initClouds();
 
   // Start game loop
   lastTime = performance.now();
