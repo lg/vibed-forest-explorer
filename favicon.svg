@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -24 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="skinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffe0bd"/>
+      <stop offset="100%" style="stop-color:#f5d6ba"/>
+    </linearGradient>
+  </defs>
+  <!-- Head -->
+  <circle cx="0" cy="0" r="12" fill="url(#skinGrad)"/>
+  <!-- Hair base -->
+  <ellipse cx="0" cy="-6" rx="14" ry="5" fill="#5d4037"/>
+  <!-- Hat back -->
+  <polygon points="0,-24 10,-10 -10,-10" fill="#a0522d"/>
+  <!-- Hat front -->
+  <polygon points="0,-22 7,-12 -7,-12" fill="#cd853f"/>
+  <!-- Eyes -->
+  <circle cx="-4" cy="0" r="2.5" fill="#333"/>
+  <circle cx="4" cy="0" r="2.5" fill="#333"/>
+  <!-- Eye highlights -->
+  <circle cx="-4" cy="0" r="1" fill="#fff"/>
+  <circle cx="4" cy="0" r="1" fill="#fff"/>
+  <!-- Nose -->
+  <ellipse cx="0" cy="6" rx="2" ry="1.5" fill="#e8b89d"/>
+  <!-- Mouth -->
+  <path d="M-2,6 Q0,8 2,6" stroke="#c97c5d" stroke-width="0.5" fill="none"/>
+</svg>

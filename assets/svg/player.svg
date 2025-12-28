@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -35 32 75" width="32" height="75">
+  <defs>
+    <linearGradient id="shirtGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4a90d9"/>
+      <stop offset="50%" style="stop-color:#5ba3e8"/>
+      <stop offset="100%" style="stop-color:#4a90d9"/>
+    </linearGradient>
+    <linearGradient id="skinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffe0bd"/>
+      <stop offset="100%" style="stop-color:#f5d6ba"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="0" cy="28" rx="10" ry="12" fill="url(#skinGrad)"/>
+  <rect x="-12" y="16" width="24" height="20" rx="2" fill="url(#shirtGrad)"/>
+  <rect x="-12" y="28" width="24" height="8" fill="#5d4037"/>
+  <path d="M-12,16 L-14,20 L-12,24" fill="#3d5a80"/>
+  <path d="M12,16 L14,20 L12,24" fill="#3d5a80"/>
+  <circle cx="0" cy="4" r="12" fill="url(#skinGrad)"/>
+  <ellipse cx="0" cy="-2" rx="16" ry="5" fill="#5d4037"/>
+  <polygon points="0,-22 10,-8 -10,-8" fill="#a0522d"/>
+  <polygon points="0,-20 7,-10 -7,-10" fill="#cd853f"/>
+  <circle cx="-4" cy="4" r="2.5" fill="#333"/>
+  <circle cx="4" cy="4" r="2.5" fill="#333"/>
+  <circle cx="-4" cy="4" r="1" fill="#fff"/>
+  <circle cx="4" cy="4" r="1" fill="#fff"/>
+  <ellipse cx="0" cy="10" rx="2" ry="1.5" fill="#e8b89d"/>
+  <path d="M-2,10 Q0,12 2,10" stroke="#c97c5d" stroke-width="0.5" fill="none"/>
+  <circle cx="-8" cy="16" r="2" fill="#3d5a80"/>
+  <circle cx="8" cy="16" r="2" fill="#3d5a80"/>
+  <rect x="-7" y="32" width="5" height="10" rx="1" fill="#5d4037"/>
+  <rect x="2" y="32" width="5" height="10" rx="1" fill="#5d4037"/>
+  <ellipse cx="-4" cy="42" rx="3" ry="1.5" fill="#3e2723"/>
+  <ellipse cx="4" cy="42" rx="3" ry="1.5" fill="#3e2723"/>
+  <circle cx="-10" cy="10" r="3" fill="#ffe0bd" opacity="0.5"/>
+  <circle cx="10" cy="8" r="2" fill="#ffe0bd" opacity="0.3"/>
+</svg>

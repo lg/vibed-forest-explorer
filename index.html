@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Isometric Forest</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game"></canvas>
+    <div id="ui">Forest Explorer</div>
+    <div id="instructions">Arrow Keys or WASD to Move</div>
+  </div>
+  <script>
+    fetch('game.ts')
+      .then(r => r.text())
+      .then(code => Babel.transform(code, { presets: ['typescript'], filename: 'game.ts' }).code)
+      .then(js => eval(js));
+  </script>
+</body>
+</html>
