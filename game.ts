@@ -35,6 +35,8 @@ interface Player {
   y: number;
   targetX: number;
   targetY: number;
+  prevTileX: number;
+  prevTileY: number;
   direction: number;
   targetDirection: number;
   isMoving: boolean;
@@ -81,6 +83,8 @@ const TILE_SIZE = 1;
 const MOVE_SPEED = 5;
 const TILE_HEIGHT = 0.15;
 const ROTATION_SPEED = 25; // radians per second
+const TARGET_FPS = 60;
+const FRAME_INTERVAL = 1000 / TARGET_FPS;
 
 // Camera angle for isometric view (45 degrees azimuth, ~35 degrees elevation)
 const ISO_AZIMUTH = Math.PI / 4;
@@ -138,11 +142,21 @@ let pollenSprites: THREE.Sprite[] = [];
 
 let waterTiles: THREE.Mesh[] = [];
 let flowerMeshes: THREE.Group[] = [];
+
+interface FlowerState {
+  basePhase: number;
+  disturbance: number;
+  disturbanceEndTime: number;
+  triggeredForCurrentVisit: boolean;
+}
+
+let flowerStates: FlowerState[] = [];
 let fallingTrees: Decoration[] = [];
 let clouds: Cloud[] = [];
 
 let fps = 0;
 let fpsElement: HTMLElement;
+let waterFrameCount = 0;
 
 // ============================================================================
 // THREE.JS SETUP
@@ -330,8 +344,8 @@ function setupLighting(): void {
   dirLight.castShadow = true;
 
   // Shadow settings for quality
-  dirLight.shadow.mapSize.width = 2048;
-  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
   dirLight.shadow.camera.near = 0.5;
   dirLight.shadow.camera.far = 100;
   dirLight.shadow.camera.left = -30;
@@ -703,6 +717,12 @@ function createTile(x: number, y: number): Tile {
       flowerMesh.position.set(x + 0.5 + offsetX, 0, y + 0.5 + offsetY);
       scene.add(flowerMesh);
       flowerMeshes.push(flowerMesh);
+      flowerStates.push({
+        basePhase: Math.random() * Math.PI * 2,
+        disturbance: 0,
+        disturbanceEndTime: 0,
+        triggeredForCurrentVisit: false
+      });
       decoration = {
         type: 'flower',
         variant,
@@ -758,6 +778,8 @@ function createPlayer(x: number, y: number): Player {
     y,
     targetX: x,
     targetY: y,
+    prevTileX: x,
+    prevTileY: y,
     direction: 0,
     targetDirection: 0,
     isMoving: false,
@@ -898,6 +920,8 @@ function updatePlayer(deltaTime: number): void {
       const newDirection = Math.atan2(dy, dx);
 
       if (isWalkable(targetX, targetY)) {
+        player.prevTileX = Math.round(player.x);
+        player.prevTileY = Math.round(player.y);
         player.targetX = targetX;
         player.targetY = targetY;
         player.targetDirection = newDirection;
@@ -974,6 +998,7 @@ function updatePlayer(deltaTime: number): void {
 
 function updateFallingTrees(deltaTime: number): void {
   const dt = deltaTime / 1000;
+  const now = Date.now();
 
   for (let i = fallingTrees.length - 1; i >= 0; i--) {
     const tree = fallingTrees[i];
@@ -1049,11 +1074,10 @@ function updateFallingTrees(deltaTime: number): void {
       if (tile.decoration && tile.decoration.type === 'tree' && tile.decoration.state === 'healthy') {
         const health = tile.decoration.health ?? 100;
         if (health < 100 && chopCooldown > 0) {
-          // Dramatic shake - intensity based on damage
           const intensity = (100 - health) / 100 * 0.2;
-          const shake = Math.sin(Date.now() / 30) * intensity;
+          const shake = Math.sin(now / 30) * intensity;
           tile.decoration.mesh.rotation.z = shake;
-          tile.decoration.mesh.rotation.x = Math.cos(Date.now() / 25) * intensity * 0.5;
+          tile.decoration.mesh.rotation.x = Math.cos(now / 25) * intensity * 0.5;
         } else {
           tile.decoration.mesh.rotation.z = 0;
           tile.decoration.mesh.rotation.x = 0;
@@ -1068,6 +1092,9 @@ function updateFallingTrees(deltaTime: number): void {
 // ============================================================================
 
 function animateWater(time: number): void {
+  waterFrameCount++;
+  if (waterFrameCount % 2 !== 0) return;
+
   waterTiles.forEach((mesh) => {
     const geometry = mesh.geometry as THREE.PlaneGeometry;
     const positions = geometry.attributes.position;
@@ -1086,10 +1113,37 @@ function animateWater(time: number): void {
 }
 
 function animateFlowers(time: number): void {
+  const playerTileX = Math.round(player.x);
+  const playerTileY = Math.round(player.y);
+  const now = Date.now();
+
   flowerMeshes.forEach((flower, index) => {
-    const sway = Math.sin(time * 0.002 + index * 1.5) * 0.1;
-    flower.rotation.z = sway;
-    flower.rotation.x = Math.cos(time * 0.0015 + index) * 0.05;
+    const state = flowerStates[index];
+    const flowerTileX = Math.round(flower.position.x - 0.5);
+    const flowerTileY = Math.round(flower.position.z - 0.5);
+
+    const isOnTile = playerTileX === flowerTileX && playerTileY === flowerTileY;
+    const justEnteredTile = isOnTile && (player.prevTileX !== flowerTileX || player.prevTileY !== flowerTileY) && !isMoving;
+
+    if (justEnteredTile && !state.triggeredForCurrentVisit) {
+      state.disturbance = 0.2;
+      state.disturbanceEndTime = now + 250;
+      state.triggeredForCurrentVisit = true;
+    }
+
+    if (!isOnTile) {
+      state.triggeredForCurrentVisit = false;
+    }
+
+    if (now > state.disturbanceEndTime) {
+      state.disturbance *= 0.95;
+    }
+
+    const baseSway = Math.sin(time * 0.003 + state.basePhase) * 0.08;
+    const disturbanceSway = Math.sin(time * 0.015 + state.basePhase) * state.disturbance;
+
+    flower.rotation.x = baseSway + disturbanceSway;
+    flower.rotation.z = baseSway * 0.5 + disturbanceSway * 0.5;
   });
 }
 
@@ -1105,7 +1159,7 @@ function animateClouds(time: number): void {
 // ============================================================================
 
 const POLLEN_COLORS = [0xfffacd, 0xfff8dc, 0xfffaf0, 0xfffff0, 0xfff5ee, 0xfff, 0xfffdd0];
-const POLLEN_COUNT = 250;
+const POLLEN_COUNT = 100;
 
 function createPollenParticle(): PollenParticle {
   const color = POLLEN_COLORS[Math.floor(Math.random() * POLLEN_COLORS.length)];
@@ -1231,14 +1285,17 @@ function render(time: number): void {
 }
 
 function gameLoop(currentTime: number): void {
-  const deltaTime = Math.min(currentTime - lastTime, 50);
-  fps = 1000 / (currentTime - lastTime);
-  lastTime = currentTime;
+  requestAnimationFrame(gameLoop);
+
+  const elapsed = currentTime - lastTime;
+  if (elapsed < FRAME_INTERVAL) return;
+
+  const deltaTime = Math.min(elapsed, 50);
+  fps = 1000 / elapsed;
+  lastTime = currentTime - (elapsed % FRAME_INTERVAL);
 
   update(deltaTime, currentTime);
   render(currentTime);
-
-  requestAnimationFrame(gameLoop);
 }
 
 // ============================================================================
@@ -1256,6 +1313,7 @@ async function init(): Promise<void> {
   fpsElement.style.fontSize = '14px';
   fpsElement.style.textShadow = '2px 2px 0 #000';
   fpsElement.style.pointerEvents = 'none';
+
   const container = document.getElementById('game-container');
   if (container) {
     container.appendChild(fpsElement);
