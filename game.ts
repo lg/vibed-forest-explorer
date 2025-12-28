@@ -606,13 +606,15 @@ function createCloudMesh(): THREE.Group {
 
   const cloudMaterial = new THREE.MeshStandardMaterial({
     color: 0xffffff,
+    emissive: 0xffffff,
+    emissiveIntensity: 0.55,
     roughness: 1,
     flatShading: true,
     transparent: true,
-    opacity: 0.4
+    opacity: 0.65
   });
 
-  const numPuffs = 6 + Math.floor(Math.random() * 6);
+  const numPuffs = 2 + Math.floor(Math.random() * 3);
   const puffPositions: { x: number; y: number; z: number; scale: number }[] = [];
 
   for (let i = 0; i < numPuffs; i++) {
@@ -631,7 +633,7 @@ function createCloudMesh(): THREE.Group {
     cloud.add(mesh);
   });
 
-  cloud.scale.set(3 + Math.random() * 1, 1.2 + Math.random() * 0.4, 2 + Math.random() * 0.8);
+  cloud.scale.set(1.5 + Math.random() * 0.5, 0.6 + Math.random() * 0.2, 1 + Math.random() * 0.4);
 
   return cloud;
 }
@@ -1182,7 +1184,7 @@ function updateParticles(deltaTime: number, time: number): void {
 }
 
 function initClouds(): void {
-  const cloudCount = 2 + Math.floor(Math.random() * 2);
+  const cloudCount = 4 + Math.floor(Math.random() * 4);
 
   for (let i = 0; i < cloudCount; i++) {
     const cloud = createCloudMesh();
