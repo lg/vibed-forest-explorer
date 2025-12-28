@@ -4,15 +4,45 @@ This file provides guidance for AI coding agents working in this repository.
 
 ## Project Overview
 
-This is a browser-based isometric forest exploration game built with TypeScript.
+This is a browser-based 3D forest exploration game built with TypeScript and Three.js.
 The game runs directly in the browser using Babel to transpile TypeScript at runtime.
 
 ### Tech Stack
 
 - **Language**: TypeScript (transpiled in-browser via Babel)
+- **3D Engine**: Three.js (loaded via CDN as UMD/global build)
 - **Runtime**: Browser (no Node.js server required)
 - **Package Manager**: Bun
 - **Linter**: oxlint
+
+## CRITICAL: TypeScript Only - No JavaScript
+
+**ALWAYS use TypeScript (`.ts` files), NEVER plain JavaScript (`.js` files).**
+
+This project uses a no-build-step architecture:
+- TypeScript files are fetched and transpiled by Babel at runtime in the browser
+- There is NO precompilation, NO bundler, NO build process
+- Simply serve files with a static HTTP server and load `index.html`
+
+### Why TypeScript Only
+
+1. **Type safety**: Catch errors at development time
+2. **Better tooling**: IDE autocomplete, refactoring support
+3. **Documentation**: Types serve as inline documentation
+4. **Consistency**: Single language across the entire codebase
+
+### External Libraries
+
+External libraries (like Three.js) are loaded via `<script>` tags as UMD/global builds:
+- They expose global variables (e.g., `THREE`)
+- TypeScript accesses them via `declare const` declarations
+- No `import`/`export` statements - Babel standalone doesn't handle ES modules
+
+Example for Three.js:
+```typescript
+// Declare the global THREE namespace (provided by script tag in index.html)
+declare const THREE: typeof import('three');
+```
 
 ## Build/Lint/Test Commands
 
@@ -45,6 +75,9 @@ bunx serve .
 The project uses in-browser TypeScript transpilation via Babel. The `game.ts`
 file is fetched and transpiled at runtime in `index.html`.
 
+**IMPORTANT**: Do NOT introduce any build steps, bundlers, or precompilation.
+The architecture must remain: serve files → browser fetches `.ts` → Babel transpiles → runs.
+
 ## Code Style Guidelines
 
 ### File Organization
@@ -52,7 +85,6 @@ file is fetched and transpiled at runtime in `index.html`.
 - `game.ts` - Main game logic (single-file architecture)
 - `index.html` - Entry point, loads and transpiles TypeScript
 - `style.css` - Game styling
-- `assets/svg/` - SVG assets for game sprites
 
 ### TypeScript Conventions
 
@@ -149,12 +181,6 @@ Follow this order in the main file:
   ```
 - Use nullish coalescing for defaults: `tile.decoration.health ?? 100`
 
-### Canvas Rendering
-
-- Use `ctx.save()` and `ctx.restore()` when modifying canvas state
-- Reset `ctx.globalAlpha` to 1 after transparency changes
-- Use `ctx.beginPath()` before drawing new shapes
-
 ### Imports
 
 This project does not use ES modules - all code is in a single file transpiled
@@ -168,23 +194,13 @@ by Babel at runtime. Do not add import/export statements.
   - Game mechanics (e.g., tree chopping cooldown)
   - Rendering order/depth sorting
 
-## Assets
-
-SVG assets are stored in `assets/svg/`:
-- `player.svg` - Player character sprite
-- `tree.svg` - Tree decoration
-- `rock.svg` - Rock decoration
-- `flower.svg` - Flower decoration
-
-Load assets using the `loadSVG()` helper function.
-
 ## Game Architecture
 
 ### Coordinate Systems
 
 - **World coordinates**: Grid-based (x, y) tile positions
-- **Screen coordinates**: Isometric projection for rendering
-- Use `isoToScreen(x, y, z)` to convert world to screen coordinates
+- **3D coordinates**: Three.js scene with Y-up convention
+- World center is at `(WORLD_SIZE/2, 0, WORLD_SIZE/2)`
 
 ### Game Loop
 
@@ -192,8 +208,23 @@ The game uses `requestAnimationFrame` for the main loop:
 1. `update(deltaTime)` - Game state updates
 2. `render(time)` - Draw everything
 
-### Depth Sorting
+### 3D Models
 
-Entities are sorted by depth (x + y) before rendering to ensure correct
-overlap in isometric view. The player, decorations, and highlights are
-all sorted together.
+All game objects are created procedurally using Three.js geometries:
+- **Tiles**: `BoxGeometry` for ground tiles
+- **Trees**: `CylinderGeometry` (trunk/roots) + `ConeGeometry` (foliage layers)
+- **Rocks**: `DodecahedronGeometry` with flat shading
+- **Flowers**: `CylinderGeometry` (stem) + `SphereGeometry` (petals/center)
+- **Player**: Combination of `SphereGeometry`, `BoxGeometry`, `CylinderGeometry`, `ConeGeometry`
+
+### Camera
+
+- Orthographic camera for isometric-style view
+- Custom orbit controls (mouse drag to rotate, scroll to zoom)
+- Default angle: 45° azimuth, 60° polar (classic isometric)
+
+### Lighting
+
+- `AmbientLight` - Base illumination
+- `HemisphereLight` - Sky/ground color gradient
+- `DirectionalLight` - Sun with shadow casting (PCFSoftShadowMap)

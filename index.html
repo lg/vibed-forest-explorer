@@ -3,16 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Isometric Forest</title>
+  <title>3D Forest Explorer</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
+  <!-- Three.js (UMD build - exposes global THREE) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+  <!-- Babel for runtime TypeScript transpilation -->
   <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
 </head>
 <body>
   <div id="game-container">
-    <canvas id="game"></canvas>
     <div id="ui">Forest Explorer</div>
-    <div id="instructions">Arrow Keys or WASD to Move</div>
+    <div id="instructions">Arrow Keys or WASD to Move | Mouse Drag to Rotate | Scroll to Zoom</div>
   </div>
   <script>
     fetch('game.ts')
