@@ -6,6 +6,15 @@
   <title>3D Forest Explorer</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
+  <!-- Import map for ES module loading (GLTFLoader) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
   <!-- Three.js (UMD build - exposes global THREE) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
   <!-- Babel for runtime TypeScript transpilation -->

@@ -1,6 +1,9 @@
 // Declare Three.js global (provided by script tag in index.html)
 declare const THREE: typeof import('three');
 
+// Cached loaded models (populated by loadModels)
+let modelCache: Record<string, THREE.Group> = {};
+
 // ============================================================================
 // INTERFACES
 // ============================================================================
@@ -33,7 +36,9 @@ interface Player {
   targetX: number;
   targetY: number;
   direction: number;
+  targetDirection: number;
   isMoving: boolean;
+  isRotating: boolean;
   animTime: number;
   mesh: THREE.Group;
 }
@@ -71,12 +76,13 @@ interface OrbitState {
 // CONSTANTS
 // ============================================================================
 
-const CANVAS_WIDTH = 900;
-const CANVAS_HEIGHT = 700;
+let canvasWidth = window.innerWidth;
+let canvasHeight = window.innerHeight;
 const WORLD_SIZE = 20;
 const TILE_SIZE = 1;
 const MOVE_SPEED = 5;
 const TILE_HEIGHT = 0.15;
+const ROTATION_SPEED = 25; // radians per second
 
 // Camera angle for isometric view (45 degrees azimuth, ~35 degrees elevation)
 const ISO_AZIMUTH = Math.PI / 4;
@@ -84,7 +90,7 @@ const ISO_POLAR = Math.PI / 3;
 const CAMERA_DISTANCE = 25;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.0;
-const DEFAULT_ZOOM = 1.5;
+const DEFAULT_ZOOM = 2.0;
 
 // Colors
 const COLORS = {
@@ -149,7 +155,7 @@ function initThreeJS(): void {
   scene.background = new THREE.Color(COLORS.sky);
 
   // Orthographic camera for isometric view
-  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+  const aspect = canvasWidth / canvasHeight;
   const frustumSize = 15;
   camera = new THREE.OrthographicCamera(
     -frustumSize * aspect,
@@ -178,7 +184,7 @@ function initThreeJS(): void {
 
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+  renderer.setSize(canvasWidth, canvasHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -191,8 +197,27 @@ function initThreeJS(): void {
   // Setup manual orbit controls
   setupOrbitControls();
 
+  // Handle window resize
+  window.addEventListener('resize', onWindowResize);
+
   // Lighting
   setupLighting();
+}
+
+function onWindowResize(): void {
+  canvasWidth = window.innerWidth;
+  canvasHeight = window.innerHeight;
+
+  const aspect = canvasWidth / canvasHeight;
+  const frustumSize = 15 / orbitState.zoom;
+
+  camera.left = -frustumSize * aspect;
+  camera.right = frustumSize * aspect;
+  camera.top = frustumSize;
+  camera.bottom = -frustumSize;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(canvasWidth, canvasHeight);
 }
 
 function updateCameraPosition(): void {
@@ -280,7 +305,7 @@ function updateOrbitControls(): void {
   orbitState.zoom += (orbitState.targetZoom - orbitState.zoom) * damping;
 
   // Update camera frustum for zoom
-  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+  const aspect = canvasWidth / canvasHeight;
   const frustumSize = 15 / orbitState.zoom;
   camera.left = -frustumSize * aspect;
   camera.right = frustumSize * aspect;
@@ -317,6 +342,31 @@ function setupLighting(): void {
   dirLight.shadow.bias = -0.0001;
 
   scene.add(dirLight);
+}
+
+// ============================================================================
+// MODEL LOADING
+// ============================================================================
+
+async function loadModels(): Promise<void> {
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const loader = new (GLTFLoader as any)();
+
+  const modelNames = ['tree', 'rock', 'flower', 'player'];
+  const promises = modelNames.map(name =>
+    new Promise<void>((resolve, reject) => {
+      loader.load(
+        `models/${name}.glb`,
+        (gltf: any) => {
+          modelCache[name] = gltf.scene;
+          resolve();
+        },
+        undefined,
+        (error: Error) => reject(error)
+      );
+    })
+  );
+  await Promise.all(promises);
 }
 
 // ============================================================================
@@ -419,312 +469,137 @@ function createHighlight(): THREE.LineLoop {
 }
 
 function createTreeMesh(variant: number): THREE.Group {
-  const group = new THREE.Group();
+  const tree = modelCache['tree'].clone();
 
-  // Trunk
-  const trunkGeometry = new THREE.CylinderGeometry(0.12, 0.18, 0.8, 8);
+  // Apply variant-specific trunk color
+  const trunkColors = [COLORS.trunk, 0x6d4c41, COLORS.trunkDark];
   const trunkMaterial = new THREE.MeshStandardMaterial({
-    color: variant === 0 ? COLORS.trunk : variant === 1 ? 0x6d4c41 : COLORS.trunkDark,
+    color: trunkColors[variant] ?? COLORS.trunk,
     roughness: 0.9
   });
-  const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-  trunk.position.y = 0.4;
-  trunk.castShadow = true;
-  trunk.receiveShadow = true;
-  group.add(trunk);
 
-  // Roots (3 small cylinders)
-  for (let i = 0; i < 3; i++) {
-    const rootGeometry = new THREE.CylinderGeometry(0.04, 0.07, 0.25, 6);
-    const root = new THREE.Mesh(rootGeometry, trunkMaterial);
-    const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
-    root.position.set(
-      Math.cos(angle) * 0.15,
-      0.08,
-      Math.sin(angle) * 0.15
-    );
-    root.rotation.z = Math.cos(angle) * 0.4;
-    root.rotation.x = Math.sin(angle) * 0.4;
-    root.castShadow = true;
-    group.add(root);
-  }
+  tree.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
 
-  // Foliage layers (4 cones stacked)
-  const foliageColors = [
-    COLORS.leaves[0],
-    COLORS.leaves[1],
-    COLORS.leaves[2],
-    COLORS.leaves[3]
-  ];
-
-  const layerParams = [
-    { radius: 0.7, height: 0.9, y: 1.0 },
-    { radius: 0.55, height: 0.75, y: 1.6 },
-    { radius: 0.4, height: 0.6, y: 2.1 },
-    { radius: 0.25, height: 0.5, y: 2.5 }
-  ];
-
-  layerParams.forEach((params, i) => {
-    const coneGeometry = new THREE.ConeGeometry(params.radius, params.height, 8);
-    const coneMaterial = new THREE.MeshStandardMaterial({
-      color: foliageColors[i],
-      roughness: 0.8
-    });
-    const cone = new THREE.Mesh(coneGeometry, coneMaterial);
-    cone.position.y = params.y;
-    cone.castShadow = true;
-    cone.receiveShadow = true;
-    group.add(cone);
+    if (child.name === 'trunk' || child.name.startsWith('root_')) {
+      mesh.material = trunkMaterial;
+    } else if (child.name.startsWith('foliage_')) {
+      const idx = parseInt(child.name.split('_')[1]);
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: COLORS.leaves[idx],
+        roughness: 0.8
+      });
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
   });
 
   // Random rotation and slight scale variation
-  group.rotation.y = Math.random() * Math.PI * 2;
+  tree.rotation.y = Math.random() * Math.PI * 2;
   const scale = 0.9 + Math.random() * 0.2;
-  group.scale.set(scale, scale, scale);
+  tree.scale.set(scale, scale, scale);
 
-  return group;
+  return tree;
 }
 
 function createRockMesh(variant: number): THREE.Group {
-  const group = new THREE.Group();
+  const rock = modelCache['rock'].clone();
 
   const isMossy = variant === 1;
   const mainColor = isMossy ? COLORS.rockMoss : COLORS.rock;
+  const smallColor = isMossy ? 0x558b2f : COLORS.rockDark;
 
-  // Main rock
-  const mainGeometry = new THREE.DodecahedronGeometry(0.35, 0);
-  const mainMaterial = new THREE.MeshStandardMaterial({
-    color: mainColor,
-    roughness: 0.9,
-    flatShading: true
+  rock.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+
+    if (child.name === 'main') {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: mainColor,
+        roughness: 0.9,
+        flatShading: true
+      });
+      // Add random rotation to main rock
+      mesh.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        Math.random() * Math.PI
+      );
+    } else if (child.name.startsWith('small_')) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: smallColor,
+        roughness: 0.95,
+        flatShading: true
+      });
+      mesh.rotation.set(Math.random(), Math.random(), Math.random());
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
   });
-  const mainRock = new THREE.Mesh(mainGeometry, mainMaterial);
-  mainRock.scale.set(1, 0.6, 1);
-  mainRock.position.y = 0.15;
-  mainRock.rotation.set(
-    Math.random() * Math.PI,
-    Math.random() * Math.PI,
-    Math.random() * Math.PI
-  );
-  mainRock.castShadow = true;
-  mainRock.receiveShadow = true;
-  group.add(mainRock);
 
-  // Secondary smaller rocks
-  for (let i = 0; i < 2; i++) {
-    const smallGeometry = new THREE.DodecahedronGeometry(0.12, 0);
-    const smallMaterial = new THREE.MeshStandardMaterial({
-      color: isMossy ? 0x558b2f : COLORS.rockDark,
-      roughness: 0.95,
-      flatShading: true
-    });
-    const smallRock = new THREE.Mesh(smallGeometry, smallMaterial);
-    const angle = (i / 2) * Math.PI + Math.random();
-    smallRock.position.set(
-      Math.cos(angle) * 0.3,
-      0.06,
-      Math.sin(angle) * 0.3
-    );
-    smallRock.rotation.set(Math.random(), Math.random(), Math.random());
-    smallRock.castShadow = true;
-    group.add(smallRock);
-  }
-
-  return group;
+  return rock;
 }
 
 function createFlowerMesh(variant: number): THREE.Group {
-  const group = new THREE.Group();
+  const flower = modelCache['flower'].clone();
 
   const flowerColor = COLORS.flowerColors[variant];
 
-  // Stem
-  const stemGeometry = new THREE.CylinderGeometry(0.02, 0.025, 0.35, 6);
-  const stemMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.stem,
-    roughness: 0.8
+  flower.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+
+    if (child.name === 'stem' || child.name.startsWith('leaf_')) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: COLORS.stem,
+        roughness: child.name === 'stem' ? 0.8 : 0.7
+      });
+    } else if (child.name.startsWith('petal_')) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: flowerColor,
+        roughness: 0.6
+      });
+    } else if (child.name === 'center') {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: COLORS.flowerCenter,
+        roughness: 0.5
+      });
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
   });
-  const stem = new THREE.Mesh(stemGeometry, stemMaterial);
-  stem.position.y = 0.175;
-  stem.castShadow = true;
-  group.add(stem);
 
-  // Petals (5-6 arranged in circle)
-  const petalCount = 5 + Math.floor(Math.random() * 2);
-  const petalGeometry = new THREE.SphereGeometry(0.08, 8, 4);
-  const petalMaterial = new THREE.MeshStandardMaterial({
-    color: flowerColor,
-    roughness: 0.6
-  });
-
-  for (let i = 0; i < petalCount; i++) {
-    const petal = new THREE.Mesh(petalGeometry, petalMaterial);
-    petal.scale.set(1, 0.3, 0.6);
-    const angle = (i / petalCount) * Math.PI * 2;
-    petal.position.set(
-      Math.cos(angle) * 0.08,
-      0.38,
-      Math.sin(angle) * 0.08
-    );
-    petal.rotation.z = -Math.cos(angle) * 0.5;
-    petal.rotation.x = Math.sin(angle) * 0.5;
-    petal.castShadow = true;
-    group.add(petal);
-  }
-
-  // Center (stamen)
-  const centerGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-  const centerMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.flowerCenter,
-    roughness: 0.5
-  });
-  const center = new THREE.Mesh(centerGeometry, centerMaterial);
-  center.position.y = 0.38;
-  group.add(center);
-
-  // Leaves on stem
-  const leafGeometry = new THREE.SphereGeometry(0.06, 6, 4);
-  const leafMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.stem,
-    roughness: 0.7
-  });
-  for (let i = 0; i < 2; i++) {
-    const leaf = new THREE.Mesh(leafGeometry, leafMaterial);
-    leaf.scale.set(1, 0.2, 0.5);
-    leaf.position.set(
-      (i === 0 ? 1 : -1) * 0.06,
-      0.1 + i * 0.08,
-      0
-    );
-    leaf.rotation.z = (i === 0 ? -1 : 1) * 0.8;
-    group.add(leaf);
-  }
-
-  return group;
+  return flower;
 }
 
 function createPlayerMesh(): THREE.Group {
-  const group = new THREE.Group();
+  const player = modelCache['player'].clone();
 
-  // Body/Torso
-  const torsoGeometry = new THREE.BoxGeometry(0.35, 0.4, 0.2);
-  const torsoMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.shirt,
-    roughness: 0.7
-  });
-  const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
-  torso.position.y = 0.55;
-  torso.castShadow = true;
-  group.add(torso);
+  player.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
 
-  // Head
-  const headGeometry = new THREE.SphereGeometry(0.18, 16, 16);
-  const headMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.skin,
-    roughness: 0.6
-  });
-  const head = new THREE.Mesh(headGeometry, headMaterial);
-  head.position.y = 0.95;
-  head.castShadow = true;
-  group.add(head);
-
-  // Hat
-  const hatBrimGeometry = new THREE.CylinderGeometry(0.25, 0.25, 0.03, 16);
-  const hatMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.hat,
-    roughness: 0.8
-  });
-  const hatBrim = new THREE.Mesh(hatBrimGeometry, hatMaterial);
-  hatBrim.position.y = 1.08;
-  hatBrim.castShadow = true;
-  group.add(hatBrim);
-
-  const hatTopGeometry = new THREE.ConeGeometry(0.18, 0.35, 16);
-  const hatTop = new THREE.Mesh(hatTopGeometry, hatMaterial);
-  hatTop.position.y = 1.28;
-  hatTop.castShadow = true;
-  group.add(hatTop);
-
-  // Eyes
-  const eyeGeometry = new THREE.SphereGeometry(0.035, 8, 8);
-  const eyeMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-  const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-  leftEye.position.set(-0.06, 0.97, 0.15);
-  group.add(leftEye);
-
-  const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-  rightEye.position.set(0.06, 0.97, 0.15);
-  group.add(rightEye);
-
-  // Eye highlights
-  const highlightGeometry = new THREE.SphereGeometry(0.015, 6, 6);
-  const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const leftHighlight = new THREE.Mesh(highlightGeometry, highlightMaterial);
-  leftHighlight.position.set(-0.055, 0.98, 0.175);
-  group.add(leftHighlight);
-
-  const rightHighlight = new THREE.Mesh(highlightGeometry, highlightMaterial);
-  rightHighlight.position.set(0.065, 0.98, 0.175);
-  group.add(rightHighlight);
-
-  // Arms
-  const armGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.35, 8);
-  const armMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.skin,
-    roughness: 0.6
+    if (child.name === 'torso') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.shirt, roughness: 0.7 });
+    } else if (child.name === 'head') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.skin, roughness: 0.6 });
+    } else if (child.name === 'hatBrim' || child.name === 'hatTop') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.hat, roughness: 0.8 });
+    } else if (child.name === 'leftEye' || child.name === 'rightEye') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    } else if (child.name === 'leftArm' || child.name === 'rightArm') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.skin, roughness: 0.6 });
+    } else if (child.name === 'leftLeg' || child.name === 'rightLeg') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.pants, roughness: 0.8 });
+    } else if (child.name === 'leftFoot' || child.name === 'rightFoot') {
+      mesh.material = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 });
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
   });
 
-  const leftArm = new THREE.Mesh(armGeometry, armMaterial);
-  leftArm.position.set(-0.25, 0.55, 0);
-  leftArm.rotation.z = 0.2;
-  leftArm.castShadow = true;
-  leftArm.name = 'leftArm';
-  group.add(leftArm);
-
-  const rightArm = new THREE.Mesh(armGeometry, armMaterial);
-  rightArm.position.set(0.25, 0.55, 0);
-  rightArm.rotation.z = -0.2;
-  rightArm.castShadow = true;
-  rightArm.name = 'rightArm';
-  group.add(rightArm);
-
-  // Legs
-  const legGeometry = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8);
-  const legMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.pants,
-    roughness: 0.8
-  });
-
-  const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-  leftLeg.position.set(-0.1, 0.2, 0);
-  leftLeg.castShadow = true;
-  leftLeg.name = 'leftLeg';
-  group.add(leftLeg);
-
-  const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
-  rightLeg.position.set(0.1, 0.2, 0);
-  rightLeg.castShadow = true;
-  rightLeg.name = 'rightLeg';
-  group.add(rightLeg);
-
-  // Feet
-  const footGeometry = new THREE.BoxGeometry(0.1, 0.05, 0.15);
-  const footMaterial = new THREE.MeshStandardMaterial({
-    color: 0x3e2723,
-    roughness: 0.9
-  });
-
-  const leftFoot = new THREE.Mesh(footGeometry, footMaterial);
-  leftFoot.position.set(-0.1, 0.025, 0.02);
-  leftFoot.castShadow = true;
-  group.add(leftFoot);
-
-  const rightFoot = new THREE.Mesh(footGeometry, footMaterial);
-  rightFoot.position.set(0.1, 0.025, 0.02);
-  rightFoot.castShadow = true;
-  group.add(rightFoot);
-
-  return group;
+  return player;
 }
 
 // ============================================================================
@@ -848,7 +723,9 @@ function createPlayer(x: number, y: number): Player {
     targetX: x,
     targetY: y,
     direction: 0,
+    targetDirection: 0,
     isMoving: false,
+    isRotating: false,
     animTime: 0,
     mesh
   };
@@ -921,10 +798,41 @@ function damageTree(x: number, y: number): boolean {
   return false;
 }
 
+// Helper to normalize angle to [-PI, PI]
+function normalizeAngle(angle: number): number {
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  return angle;
+}
+
+// Helper to get shortest angle difference
+function angleDifference(from: number, to: number): number {
+  return normalizeAngle(to - from);
+}
+
 function updatePlayer(deltaTime: number): void {
   const dt = deltaTime / 1000;
 
-  if (isMoving) {
+  // Handle rotation first
+  if (player.isRotating) {
+    const diff = angleDifference(player.direction, player.targetDirection);
+    const rotationStep = ROTATION_SPEED * dt;
+    
+    if (Math.abs(diff) < rotationStep) {
+      // Rotation complete
+      player.direction = player.targetDirection;
+      player.isRotating = false;
+      // Now start moving if we have a target
+      if (player.targetX !== player.x || player.targetY !== player.y) {
+        isMoving = true;
+        player.isMoving = true;
+      }
+    } else {
+      // Continue rotating
+      player.direction += Math.sign(diff) * rotationStep;
+      player.direction = normalizeAngle(player.direction);
+    }
+  } else if (isMoving) {
     const dx = player.targetX - player.x;
     const dy = player.targetY - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -938,7 +846,6 @@ function updatePlayer(deltaTime: number): void {
       const step = Math.min(MOVE_SPEED * dt, dist);
       player.x += (dx / dist) * step;
       player.y += (dy / dist) * step;
-      player.direction = Math.atan2(dy, dx);
       player.animTime += deltaTime * 0.01;
       player.isMoving = true;
     }
@@ -952,17 +859,36 @@ function updatePlayer(deltaTime: number): void {
     if (dx !== 0 || dy !== 0) {
       const targetX = Math.round(player.x) + dx;
       const targetY = Math.round(player.y) + dy;
-
-      // Always face the direction we're trying to move
-      player.direction = Math.atan2(dy, dx);
+      const newDirection = Math.atan2(dy, dx);
 
       if (isWalkable(targetX, targetY)) {
         player.targetX = targetX;
         player.targetY = targetY;
-        isMoving = true;
+        player.targetDirection = newDirection;
+        
+        // Check if we need to rotate first
+        const diff = Math.abs(angleDifference(player.direction, newDirection));
+        if (diff > 0.1) {
+          // Need to rotate first
+          player.isRotating = true;
+        } else {
+          // Already facing the right direction, start moving immediately
+          player.direction = newDirection;
+          isMoving = true;
+          player.isMoving = true;
+        }
       } else {
-        // Blocked - face the obstacle
-        if (chopCooldown <= 0) {
+        // Blocked - face the obstacle (rotate towards it)
+        player.targetDirection = newDirection;
+        const diff = Math.abs(angleDifference(player.direction, newDirection));
+        if (diff > 0.1) {
+          player.isRotating = true;
+        } else {
+          player.direction = newDirection;
+        }
+        
+        // Try to chop tree if facing it
+        if (!player.isRotating && chopCooldown <= 0) {
           const tileX = Math.floor(targetX);
           const tileY = Math.floor(targetY);
           if (tileX >= 0 && tileX < world.length && tileY >= 0 && tileY < world[0].length) {
@@ -981,8 +907,7 @@ function updatePlayer(deltaTime: number): void {
   const bobOffset = player.isMoving ? Math.sin(player.animTime * 10) * 0.05 : 0;
   player.mesh.position.set(player.x + 0.5, bobOffset, player.y + 0.5);
 
-  // Update player rotation to face movement direction (or attempted direction when blocked)
-  // Convert direction to face the movement direction
+  // Update player rotation to face movement direction
   // In our coordinate system: +X is right, +Z is down
   player.mesh.rotation.y = -player.direction + Math.PI / 2;
 
@@ -1233,7 +1158,7 @@ function gameLoop(currentTime: number): void {
 // INITIALIZATION
 // ============================================================================
 
-function init(): void {
+async function init(): Promise<void> {
   // Create FPS display element
   fpsElement = document.createElement('div');
   fpsElement.style.position = 'absolute';
@@ -1248,6 +1173,9 @@ function init(): void {
   if (container) {
     container.appendChild(fpsElement);
   }
+
+  // Load models first
+  await loadModels();
 
   // Initialize Three.js
   initThreeJS();
