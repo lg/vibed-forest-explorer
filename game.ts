@@ -136,6 +136,8 @@ let isMoving = false;
 let chopCooldown = 0;
 
 let highlightMesh: THREE.Group;
+let highlightCurrentX: number;
+let highlightCurrentY: number;
 let pollenParticles: PollenParticle[] = [];
 let pollenSprites: THREE.Sprite[] = [];
 let flowerMeshes: THREE.Group[] = [];
@@ -929,10 +931,20 @@ function updatePlayer(deltaTime: number): void {
     rightLeg.rotation.x = 0;
   }
 
-  // Update highlight position
-  const highlightX = isMoving ? player.targetX : Math.floor(player.x);
-  const highlightY = isMoving ? player.targetY : Math.floor(player.y);
-  highlightMesh.position.set(highlightX, 0.02, highlightY);
+  // Update highlight position with smooth transition
+  const highlightTargetX = isMoving ? player.targetX : Math.floor(player.x);
+  const highlightTargetY = isMoving ? player.targetY : Math.floor(player.y);
+  
+  // Lerp highlight towards target position
+  const highlightSpeed = 12; // Speed of highlight transition
+  highlightCurrentX += (highlightTargetX - highlightCurrentX) * highlightSpeed * dt;
+  highlightCurrentY += (highlightTargetY - highlightCurrentY) * highlightSpeed * dt;
+  
+  // Snap if very close to target
+  if (Math.abs(highlightTargetX - highlightCurrentX) < 0.01) highlightCurrentX = highlightTargetX;
+  if (Math.abs(highlightTargetY - highlightCurrentY) < 0.01) highlightCurrentY = highlightTargetY;
+  
+  highlightMesh.position.set(highlightCurrentX, 0.02, highlightCurrentY);
 }
 
 function updateFallingTrees(deltaTime: number): void {
@@ -1246,12 +1258,15 @@ async function init(): Promise<void> {
   // Generate world
   generateWorld();
 
-  // Create highlight
-  highlightMesh = createHighlight();
-
   // Spawn player
   const spawnPos = getSpawnPosition();
   player = createPlayer(spawnPos.x, spawnPos.y);
+
+  // Create highlight (after player so we can initialize position)
+  highlightMesh = createHighlight();
+  highlightCurrentX = spawnPos.x;
+  highlightCurrentY = spawnPos.y;
+  highlightMesh.position.set(highlightCurrentX, 0.02, highlightCurrentY);
 
   // Setup input
   input = createInputHandler();
