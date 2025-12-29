@@ -137,7 +137,7 @@ let lastTime = 0;
 let isMoving = false;
 let chopCooldown = 0;
 
-let highlightMesh: THREE.LineLoop;
+let highlightMesh: THREE.Group;
 let pollenParticles: PollenParticle[] = [];
 let pollenSprites: THREE.Sprite[] = [];
 
@@ -462,24 +462,43 @@ function createGridLines(): void {
   }
 }
 
-function createHighlight(): THREE.LineLoop {
-  const points = [
-    new THREE.Vector3(0, 0.02, 0),
-    new THREE.Vector3(1, 0.02, 0),
-    new THREE.Vector3(1, 0.02, 1),
-    new THREE.Vector3(0, 0.02, 1)
-  ];
+function createHighlight(): THREE.Group {
+  const group = new THREE.Group();
+  const thickness = 0.01;
+  const y = 0.02;
 
-  const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({
-    color: COLORS.highlight,
-    linewidth: 2
+  const material = new THREE.MeshBasicMaterial({
+    color: COLORS.highlight
   });
 
-  const highlight = new THREE.LineLoop(geometry, material);
-  scene.add(highlight);
+  // Create 4 box segments for the highlight border
+  // Bottom edge (along X at Z=0)
+  const bottomGeom = new THREE.BoxGeometry(1, 0.02, thickness);
+  const bottom = new THREE.Mesh(bottomGeom, material);
+  bottom.position.set(0.5, y, thickness / 2);
+  group.add(bottom);
 
-  return highlight;
+  // Top edge (along X at Z=1)
+  const topGeom = new THREE.BoxGeometry(1, 0.02, thickness);
+  const top = new THREE.Mesh(topGeom, material);
+  top.position.set(0.5, y, 1 - thickness / 2);
+  group.add(top);
+
+  // Left edge (along Z at X=0)
+  const leftGeom = new THREE.BoxGeometry(thickness, 0.02, 1 - thickness * 2);
+  const left = new THREE.Mesh(leftGeom, material);
+  left.position.set(thickness / 2, y, 0.5);
+  group.add(left);
+
+  // Right edge (along Z at X=1)
+  const rightGeom = new THREE.BoxGeometry(thickness, 0.02, 1 - thickness * 2);
+  const right = new THREE.Mesh(rightGeom, material);
+  right.position.set(1 - thickness / 2, y, 0.5);
+  group.add(right);
+
+  scene.add(group);
+
+  return group;
 }
 
 function createTreeMesh(variant: number): THREE.Group {
