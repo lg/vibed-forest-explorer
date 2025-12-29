@@ -13,8 +13,7 @@ interface Tile {
   y: number;
   type: 'grass' | 'water' | 'path';
   decoration: Decoration | null;
-  mesh: THREE.Mesh;
-  waterMesh?: THREE.Mesh;
+  mesh: THREE.Group;
 }
 
 interface Decoration {
@@ -80,7 +79,6 @@ interface OrbitState {
 let canvasWidth = window.innerWidth;
 let canvasHeight = window.innerHeight;
 const WORLD_SIZE = 20;
-const TILE_SIZE = 1;
 const MOVE_SPEED = 5;
 const TILE_HEIGHT = 0.15;
 const ROTATION_SPEED = 25; // radians per second
@@ -140,8 +138,6 @@ let chopCooldown = 0;
 let highlightMesh: THREE.Group;
 let pollenParticles: PollenParticle[] = [];
 let pollenSprites: THREE.Sprite[] = [];
-
-let waterTiles: THREE.Mesh[] = [];
 let flowerMeshes: THREE.Group[] = [];
 
 interface FlowerState {
@@ -157,7 +153,6 @@ let clouds: Cloud[] = [];
 
 let fps = 0;
 let fpsElement: HTMLElement;
-let waterFrameCount = 0;
 
 // ============================================================================
 // THREE.JS SETUP
@@ -366,7 +361,12 @@ async function loadModels(): Promise<void> {
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const loader = new (GLTFLoader as any)();
 
-  const modelNames = ['tree', 'rock', 'flower', 'player'];
+  const modelNames = [
+    'tree', 'rock', 'flower', 'player',
+    'cloud1', 'cloud2', 'cloud3',
+    'grass', 'water', 'path',
+    'highlight'
+  ];
   const promises = modelNames.map(name =>
     new Promise<void>((resolve, reject) => {
       loader.load(
@@ -387,50 +387,18 @@ async function loadModels(): Promise<void> {
 // MODEL CREATION FUNCTIONS
 // ============================================================================
 
-function createTileMesh(type: 'grass' | 'water' | 'path', x: number, y: number): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(TILE_SIZE, TILE_HEIGHT, TILE_SIZE);
-  
-  let color: number;
-  switch (type) {
-    case 'water':
-      color = COLORS.water;
-      break;
-    case 'path':
-      color = COLORS.path;
-      break;
-    default:
-      color = COLORS.grass;
-  }
+function createTileMesh(type: 'grass' | 'water' | 'path', x: number, y: number): THREE.Group {
+  const tile = modelCache[type].clone();
+  tile.position.set(x + 0.5, -TILE_HEIGHT / 2, y + 0.5);
 
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    roughness: type === 'water' ? 0.2 : 0.8,
-    metalness: type === 'water' ? 0.1 : 0
+  // Enable shadow receiving on all meshes in the group
+  tile.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      child.receiveShadow = true;
+    }
   });
 
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(x + 0.5, -TILE_HEIGHT / 2, y + 0.5);
-  mesh.receiveShadow = true;
-
-  return mesh;
-}
-
-function createWaterSurface(x: number, y: number): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 10, 10);
-  const material = new THREE.MeshStandardMaterial({
-    color: COLORS.water,
-    transparent: true,
-    opacity: 0.85,
-    roughness: 0.1,
-    metalness: 0.2
-  });
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(x + 0.5, 0.02, y + 0.5);
-  mesh.receiveShadow = true;
-
-  return mesh;
+  return tile;
 }
 
 function createGridLines(): void {
@@ -463,42 +431,10 @@ function createGridLines(): void {
 }
 
 function createHighlight(): THREE.Group {
-  const group = new THREE.Group();
-  const thickness = 0.01;
-  const y = 0.02;
-
-  const material = new THREE.MeshBasicMaterial({
-    color: COLORS.highlight
-  });
-
-  // Create 4 box segments for the highlight border
-  // Bottom edge (along X at Z=0)
-  const bottomGeom = new THREE.BoxGeometry(1, 0.02, thickness);
-  const bottom = new THREE.Mesh(bottomGeom, material);
-  bottom.position.set(0.5, y, thickness / 2);
-  group.add(bottom);
-
-  // Top edge (along X at Z=1)
-  const topGeom = new THREE.BoxGeometry(1, 0.02, thickness);
-  const top = new THREE.Mesh(topGeom, material);
-  top.position.set(0.5, y, 1 - thickness / 2);
-  group.add(top);
-
-  // Left edge (along Z at X=0)
-  const leftGeom = new THREE.BoxGeometry(thickness, 0.02, 1 - thickness * 2);
-  const left = new THREE.Mesh(leftGeom, material);
-  left.position.set(thickness / 2, y, 0.5);
-  group.add(left);
-
-  // Right edge (along Z at X=1)
-  const rightGeom = new THREE.BoxGeometry(thickness, 0.02, 1 - thickness * 2);
-  const right = new THREE.Mesh(rightGeom, material);
-  right.position.set(1 - thickness / 2, y, 0.5);
-  group.add(right);
-
-  scene.add(group);
-
-  return group;
+  const highlight = modelCache['highlight'].clone();
+  highlight.position.y = 0.02;
+  scene.add(highlight);
+  return highlight;
 }
 
 function createTreeMesh(variant: number): THREE.Group {
@@ -636,38 +572,16 @@ function createPlayerMesh(): THREE.Group {
 }
 
 function createCloudMesh(): THREE.Group {
-  const cloud = new THREE.Group();
+  // Pick a random cloud variant (1-3)
+  const variant = 1 + Math.floor(Math.random() * 3);
+  const cloud = modelCache[`cloud${variant}`].clone();
 
-  const cloudMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xffffff,
-    emissiveIntensity: 0.55,
-    roughness: 1,
-    flatShading: true,
-    transparent: true,
-    opacity: 0.65
-  });
+  // Apply random Y rotation for variety
+  cloud.rotation.y = Math.random() * Math.PI * 2;
 
-  const numPuffs = 2 + Math.floor(Math.random() * 3);
-  const puffPositions: { x: number; y: number; z: number; scale: number }[] = [];
-
-  for (let i = 0; i < numPuffs; i++) {
-    puffPositions.push({
-      x: (Math.random() - 0.5) * 3,
-      y: (Math.random() - 0.5) * 0.6,
-      z: (Math.random() - 0.5) * 1.5,
-      scale: 0.6 + Math.random() * 0.6
-    });
-  }
-
-  puffPositions.forEach((puff) => {
-    const geometry = new THREE.SphereGeometry(puff.scale, 8, 6);
-    const mesh = new THREE.Mesh(geometry, cloudMaterial);
-    mesh.position.set(puff.x, puff.y, puff.z);
-    cloud.add(mesh);
-  });
-
-  cloud.scale.set(1.5 + Math.random() * 0.5, 0.6 + Math.random() * 0.2, 1 + Math.random() * 0.4);
+  // Apply slight random scale variation
+  const scaleVariation = 0.9 + Math.random() * 0.2;
+  cloud.scale.multiplyScalar(scaleVariation);
 
   return cloud;
 }
@@ -690,13 +604,6 @@ function createTile(x: number, y: number): Tile {
 
   const mesh = createTileMesh(type, x, y);
   scene.add(mesh);
-
-  let waterMesh: THREE.Mesh | undefined;
-  if (type === 'water') {
-    waterMesh = createWaterSurface(x, y);
-    scene.add(waterMesh);
-    waterTiles.push(waterMesh);
-  }
 
   let decoration: Decoration | null = null;
 
@@ -753,7 +660,7 @@ function createTile(x: number, y: number): Tile {
     }
   }
 
-  return { x, y, type, decoration, mesh, waterMesh };
+  return { x, y, type, decoration, mesh };
 }
 
 function generateWorld(): void {
@@ -1113,27 +1020,6 @@ function updateFallingTrees(deltaTime: number): void {
 // ANIMATIONS
 // ============================================================================
 
-function animateWater(time: number): void {
-  waterFrameCount++;
-  if (waterFrameCount % 2 !== 0) return;
-
-  waterTiles.forEach((mesh) => {
-    const geometry = mesh.geometry as THREE.PlaneGeometry;
-    const positions = geometry.attributes.position;
-
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      const z = Math.sin(time * 0.002 + x * 3 + y * 3) * 0.03 +
-                Math.sin(time * 0.003 + x * 2 - y * 2) * 0.02;
-      positions.setZ(i, z);
-    }
-
-    positions.needsUpdate = true;
-    geometry.computeVertexNormals();
-  });
-}
-
 function animateFlowers(time: number): void {
   const playerTileX = Math.round(player.x);
   const playerTileY = Math.round(player.y);
@@ -1293,7 +1179,6 @@ function update(deltaTime: number, time: number): void {
 }
 
 function render(time: number): void {
-  animateWater(time);
   animateFlowers(time);
   animateClouds(time);
 
