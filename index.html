@@ -26,10 +26,18 @@
     <div id="instructions">Arrow Keys or WASD to Move | Mouse Drag to Rotate | Scroll to Zoom</div>
   </div>
   <script>
-    fetch('game.ts')
-      .then(r => r.text())
-      .then(code => Babel.transform(code, { presets: ['typescript'], filename: 'game.ts' }).code)
-      .then(js => eval(js));
+    const files = [
+      'utils.ts',
+      'grass.ts', 'water.ts', 'path.ts',
+      'flower.ts', 'tree.ts', 'rock.ts',
+      'player.ts', 'world.ts', 'game.ts'
+    ];
+
+    Promise.all(files.map(f => fetch(f).then(r => r.text())))
+      .then(sources => sources.map((code, i) =>
+        Babel.transform(code, { presets: ['typescript'], filename: files[i] }).code
+      ))
+      .then(compiled => eval(compiled.join('\n')));
   </script>
 </body>
 </html>

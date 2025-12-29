@@ -1,49 +1,36 @@
-// Declare Three.js global (provided by script tag in index.html)
+// Main game file - GameState, renderer, player logic, game loop
+
 declare const THREE: typeof import('three');
 
-// Cached loaded models (populated by loadModels)
-let modelCache: Record<string, THREE.Group> = {};
+// ============================================================================
+// HIGHLIGHT MODEL (loaded here so it's in same scope as usage)
+// ============================================================================
+
+let gameHighlightModel: THREE.Group | null = null;
+
+async function loadGameHighlightModel(): Promise<void> {
+  gameHighlightModel = await loadModel('models/highlight.glb');
+}
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const MOVE_SPEED = 5;
+const ROTATION_SPEED = 25;
+const TARGET_FPS = 60;
+const FRAME_INTERVAL = 1000 / TARGET_FPS;
+
+const ISO_AZIMUTH = Math.PI / 4;
+const ISO_POLAR = Math.PI / 3;
+const CAMERA_DISTANCE = 25;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.0;
+const DEFAULT_ZOOM = 2.0;
 
 // ============================================================================
 // INTERFACES
 // ============================================================================
-
-interface Tile {
-  x: number;
-  y: number;
-  type: 'grass' | 'water' | 'path';
-  decoration: Decoration | null;
-  mesh: THREE.Group;
-}
-
-interface Decoration {
-  type: 'tree' | 'rock' | 'flower';
-  variant: number;
-  offsetX: number;
-  offsetY: number;
-  health?: number;
-  mesh: THREE.Group;
-  state?: 'healthy' | 'falling' | 'fading';
-  fallAngle?: number;
-  fallDirection?: THREE.Vector3;
-  opacity?: number;
-  shakeEndTime?: number;
-}
-
-interface Player {
-  x: number;
-  y: number;
-  targetX: number;
-  targetY: number;
-  prevTileX: number;
-  prevTileY: number;
-  direction: number;
-  targetDirection: number;
-  isMoving: boolean;
-  isRotating: boolean;
-  animTime: number;
-  mesh: THREE.Group;
-}
 
 interface InputState {
   up: boolean;
@@ -52,14 +39,6 @@ interface InputState {
   right: boolean;
 }
 
-interface Cloud {
-  mesh: THREE.Group;
-  speed: number;
-  initialX: number;
-  amplitude: number;
-}
-
-// Simple orbit controls state
 interface OrbitState {
   isDragging: boolean;
   previousMouseX: number;
@@ -73,112 +52,45 @@ interface OrbitState {
 }
 
 // ============================================================================
-// CONSTANTS
+// GAME STATE SINGLETON
 // ============================================================================
 
-let canvasWidth = window.innerWidth;
-let canvasHeight = window.innerHeight;
-const WORLD_SIZE = 20;
-const MOVE_SPEED = 5;
-const TILE_HEIGHT = 0.15;
-const ROTATION_SPEED = 25; // radians per second
-const TARGET_FPS = 60;
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
+const GameState = {
+  scene: null as THREE.Scene | null,
+  camera: null as THREE.OrthographicCamera | null,
+  renderer: null as THREE.WebGLRenderer | null,
+  orbitState: null as OrbitState | null,
 
-// Camera angle for isometric view (45 degrees azimuth, ~35 degrees elevation)
-const ISO_AZIMUTH = Math.PI / 4;
-const ISO_POLAR = Math.PI / 3;
-const CAMERA_DISTANCE = 25;
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
-const DEFAULT_ZOOM = 2.0;
+  world: [] as Tile[][],
+  player: null as Player | null,
+  highlightMesh: null as THREE.Group | null,
+  highlightCurrentX: 0,
+  highlightCurrentY: 0,
+  input: null as InputState | null,
 
-// Colors
-const COLORS = {
-  sky: 0x87ceeb,
-  grass: 0x27ae60,
-  grassDark: 0x1e8449,
-  water: 0x3498db,
-  waterDeep: 0x2980b9,
-  path: 0x8b7355,
-  pathDark: 0x7a6348,
-  trunk: 0x5d4037,
-  trunkDark: 0x4e342e,
-  leaves: [0x1b5e20, 0x2e7d32, 0x388e3c, 0x43a047],
-  rock: 0x757575,
-  rockDark: 0x616161,
-  rockMoss: 0x689f38,
-  flowerColors: [0xe74c3c, 0xf39c12, 0x9b59b6, 0xe91e63],
-  flowerCenter: 0xf1c40f,
-  stem: 0x2e7d32,
-  skin: 0xffe0bd,
-  shirt: 0x4a90d9,
-  pants: 0x5d4037,
-  hat: 0xa0522d,
-  highlight: 0xffeb3b,
-  gridLine: 0x000000
+  flowers: [] as Flower[],
+  trees: [] as Tree[],
+  clouds: [] as Cloud[],
+
+  pollenParticles: [] as PollenParticle[],
+  pollenSprites: [] as THREE.Sprite[],
+
+  canvasWidth: window.innerWidth,
+  canvasHeight: window.innerHeight,
+  lastTime: 0,
+  fps: 0,
+  fpsElement: null as HTMLElement | null,
+
+  isMoving: false,
+  chopCooldown: 0
 };
 
 // ============================================================================
-// GLOBAL VARIABLES
+// FACTORY FUNCTIONS
 // ============================================================================
 
-let scene: THREE.Scene;
-let camera: THREE.OrthographicCamera;
-let renderer: THREE.WebGLRenderer;
-let orbitState: OrbitState;
-
-let world: Tile[][];
-let player: Player;
-let input: InputState;
-let lastTime = 0;
-let isMoving = false;
-let chopCooldown = 0;
-
-let highlightMesh: THREE.Group;
-let highlightCurrentX: number;
-let highlightCurrentY: number;
-let pollenParticles: PollenParticle[] = [];
-let pollenSprites: THREE.Sprite[] = [];
-let flowerMeshes: THREE.Group[] = [];
-
-interface FlowerState {
-  basePhase: number;
-  disturbance: number;
-  disturbanceEndTime: number;
-  triggeredForCurrentVisit: boolean;
-}
-
-let flowerStates: FlowerState[] = [];
-let fallingTrees: Decoration[] = [];
-let clouds: Cloud[] = [];
-
-let fps = 0;
-let fpsElement: HTMLElement;
-
-// ============================================================================
-// THREE.JS SETUP
-// ============================================================================
-
-function initThreeJS(): void {
-  // Scene
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(COLORS.sky);
-
-  // Orthographic camera for isometric view
-  const aspect = canvasWidth / canvasHeight;
-  const frustumSize = 15;
-  camera = new THREE.OrthographicCamera(
-    -frustumSize * aspect,
-    frustumSize * aspect,
-    frustumSize,
-    -frustumSize,
-    0.1,
-    1000
-  );
-
-  // Initialize orbit state with isometric defaults
-  orbitState = {
+function createOrbitState(): OrbitState {
+  return {
     isDragging: false,
     previousMouseX: 0,
     previousMouseY: 0,
@@ -189,549 +101,7 @@ function initThreeJS(): void {
     zoom: DEFAULT_ZOOM,
     targetZoom: DEFAULT_ZOOM
   };
-
-  // Position camera at isometric angle
-  updateCameraPosition();
-
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(canvasWidth, canvasHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-  const container = document.getElementById('game-container');
-  if (container) {
-    container.insertBefore(renderer.domElement, container.firstChild);
-  }
-
-  // Setup manual orbit controls
-  setupOrbitControls();
-
-  // Handle window resize
-  window.addEventListener('resize', onWindowResize);
-
-  // Lighting
-  setupLighting();
 }
-
-function onWindowResize(): void {
-  canvasWidth = window.innerWidth;
-  canvasHeight = window.innerHeight;
-
-  const aspect = canvasWidth / canvasHeight;
-  const frustumSize = 15 / orbitState.zoom;
-
-  camera.left = -frustumSize * aspect;
-  camera.right = frustumSize * aspect;
-  camera.top = frustumSize;
-  camera.bottom = -frustumSize;
-  camera.updateProjectionMatrix();
-
-  renderer.setSize(canvasWidth, canvasHeight);
-}
-
-function updateCameraPosition(): void {
-  const x = CAMERA_DISTANCE * Math.sin(orbitState.polar) * Math.sin(orbitState.azimuth);
-  const y = CAMERA_DISTANCE * Math.cos(orbitState.polar);
-  const z = CAMERA_DISTANCE * Math.sin(orbitState.polar) * Math.cos(orbitState.azimuth);
-  camera.position.set(x + WORLD_SIZE / 2, y, z + WORLD_SIZE / 2);
-  camera.lookAt(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
-}
-
-function setupOrbitControls(): void {
-  const canvas = renderer.domElement;
-
-  canvas.addEventListener('mousedown', (e: MouseEvent) => {
-    orbitState.isDragging = true;
-    orbitState.previousMouseX = e.clientX;
-    orbitState.previousMouseY = e.clientY;
-  });
-
-  canvas.addEventListener('mousemove', (e: MouseEvent) => {
-    if (!orbitState.isDragging) return;
-
-    const deltaX = e.clientX - orbitState.previousMouseX;
-    const deltaY = e.clientY - orbitState.previousMouseY;
-
-    orbitState.targetAzimuth -= deltaX * 0.005;
-    orbitState.targetPolar -= deltaY * 0.005;
-
-    // Clamp polar angle to prevent flipping
-    orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
-
-    orbitState.previousMouseX = e.clientX;
-    orbitState.previousMouseY = e.clientY;
-  });
-
-  canvas.addEventListener('mouseup', () => {
-    orbitState.isDragging = false;
-  });
-
-  canvas.addEventListener('mouseleave', () => {
-    orbitState.isDragging = false;
-  });
-
-  // Touch support
-  canvas.addEventListener('touchstart', (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      orbitState.isDragging = true;
-      orbitState.previousMouseX = e.touches[0].clientX;
-      orbitState.previousMouseY = e.touches[0].clientY;
-    }
-  });
-
-  canvas.addEventListener('touchmove', (e: TouchEvent) => {
-    if (!orbitState.isDragging || e.touches.length !== 1) return;
-
-    const deltaX = e.touches[0].clientX - orbitState.previousMouseX;
-    const deltaY = e.touches[0].clientY - orbitState.previousMouseY;
-
-    orbitState.targetAzimuth -= deltaX * 0.005;
-    orbitState.targetPolar -= deltaY * 0.005;
-
-    orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
-
-    orbitState.previousMouseX = e.touches[0].clientX;
-    orbitState.previousMouseY = e.touches[0].clientY;
-  });
-
-  canvas.addEventListener('touchend', () => {
-    orbitState.isDragging = false;
-  });
-
-  // Mouse wheel zoom
-  canvas.addEventListener('wheel', (e: WheelEvent) => {
-    e.preventDefault();
-    const zoomDelta = e.deltaY * 0.001;
-    orbitState.targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, orbitState.targetZoom + zoomDelta));
-  }, { passive: false });
-}
-
-function updateOrbitControls(): void {
-  // Smooth damping
-  const damping = 0.1;
-  orbitState.azimuth += (orbitState.targetAzimuth - orbitState.azimuth) * damping;
-  orbitState.polar += (orbitState.targetPolar - orbitState.polar) * damping;
-  orbitState.zoom += (orbitState.targetZoom - orbitState.zoom) * damping;
-
-  // Update camera frustum for zoom
-  const aspect = canvasWidth / canvasHeight;
-  const frustumSize = 15 / orbitState.zoom;
-  camera.left = -frustumSize * aspect;
-  camera.right = frustumSize * aspect;
-  camera.top = frustumSize;
-  camera.bottom = -frustumSize;
-  camera.updateProjectionMatrix();
-
-  updateCameraPosition();
-}
-
-function setupLighting(): void {
-  // Ambient light (soft blue sky color)
-  const ambientLight = new THREE.AmbientLight(0xb4d4ff, 0.5);
-  scene.add(ambientLight);
-
-  // Hemisphere light for natural outdoor feel
-  const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5c3d, 0.3);
-  scene.add(hemiLight);
-
-  // Directional light (sun) with shadows
-  const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
-  dirLight.position.set(15, 25, 15);
-  dirLight.castShadow = true;
-
-  // Shadow settings for quality
-  dirLight.shadow.mapSize.width = 1024;
-  dirLight.shadow.mapSize.height = 1024;
-  dirLight.shadow.camera.near = 0.5;
-  dirLight.shadow.camera.far = 100;
-  dirLight.shadow.camera.left = -30;
-  dirLight.shadow.camera.right = 30;
-  dirLight.shadow.camera.top = 30;
-  dirLight.shadow.camera.bottom = -30;
-  dirLight.shadow.bias = -0.0001;
-
-  scene.add(dirLight);
-}
-
-// ============================================================================
-// MODEL LOADING
-// ============================================================================
-
-async function loadModels(): Promise<void> {
-  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-  const loader = new (GLTFLoader as any)();
-
-  const modelNames = [
-    'tree', 'rock', 'flower', 'player',
-    'cloud1', 'cloud2', 'cloud3',
-    'grass', 'water', 'path',
-    'highlight'
-  ];
-  const promises = modelNames.map(name =>
-    new Promise<void>((resolve, reject) => {
-      loader.load(
-        `models/${name}.glb`,
-        (gltf: any) => {
-          modelCache[name] = gltf.scene;
-          resolve();
-        },
-        undefined,
-        (error: Error) => reject(error)
-      );
-    })
-  );
-  await Promise.all(promises);
-}
-
-// ============================================================================
-// MODEL CREATION FUNCTIONS
-// ============================================================================
-
-function createTileMesh(type: 'grass' | 'water' | 'path', x: number, y: number): THREE.Group {
-  const tile = modelCache[type].clone();
-  tile.position.set(x + 0.5, -TILE_HEIGHT / 2, y + 0.5);
-
-  // Enable shadow receiving on all meshes in the group
-  tile.traverse((child) => {
-    if ((child as THREE.Mesh).isMesh) {
-      child.receiveShadow = true;
-    }
-  });
-
-  return tile;
-}
-
-function createGridLines(): void {
-  const material = new THREE.LineBasicMaterial({
-    color: COLORS.gridLine,
-    transparent: true,
-    opacity: 0.15
-  });
-
-  // Create grid lines
-  for (let i = 0; i <= WORLD_SIZE; i++) {
-    // X-axis lines
-    const xPoints = [
-      new THREE.Vector3(0, 0.01, i),
-      new THREE.Vector3(WORLD_SIZE, 0.01, i)
-    ];
-    const xGeometry = new THREE.BufferGeometry().setFromPoints(xPoints);
-    const xLine = new THREE.Line(xGeometry, material);
-    scene.add(xLine);
-
-    // Z-axis lines
-    const zPoints = [
-      new THREE.Vector3(i, 0.01, 0),
-      new THREE.Vector3(i, 0.01, WORLD_SIZE)
-    ];
-    const zGeometry = new THREE.BufferGeometry().setFromPoints(zPoints);
-    const zLine = new THREE.Line(zGeometry, material);
-    scene.add(zLine);
-  }
-}
-
-function createHighlight(): THREE.Group {
-  const highlight = modelCache['highlight'].clone();
-  highlight.position.y = 0.02;
-
-  // Apply yellow color to the highlight material
-  highlight.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (mesh.isMesh) {
-      mesh.material = new THREE.MeshBasicMaterial({
-        color: COLORS.highlight
-      });
-    }
-  });
-
-  scene.add(highlight);
-  return highlight;
-}
-
-function createTreeMesh(variant: number): THREE.Group {
-  const tree = modelCache['tree'].clone();
-
-  // Apply variant-specific trunk color
-  const trunkColors = [COLORS.trunk, 0x6d4c41, COLORS.trunkDark];
-  const trunkMaterial = new THREE.MeshStandardMaterial({
-    color: trunkColors[variant] ?? COLORS.trunk,
-    roughness: 0.9
-  });
-
-  tree.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-
-    if (child.name === 'trunk' || child.name.startsWith('root_')) {
-      mesh.material = trunkMaterial;
-    } else if (child.name.startsWith('foliage_')) {
-      const idx = parseInt(child.name.split('_')[1]);
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: COLORS.leaves[idx],
-        roughness: 0.8
-      });
-    }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-  });
-
-  // Random rotation and slight scale variation
-  tree.rotation.y = Math.random() * Math.PI * 2;
-  const scale = 0.9 + Math.random() * 0.2;
-  tree.scale.set(scale, scale, scale);
-
-  return tree;
-}
-
-function createRockMesh(variant: number): THREE.Group {
-  const rock = modelCache['rock'].clone();
-
-  const isMossy = variant === 1;
-  const mainColor = isMossy ? COLORS.rockMoss : COLORS.rock;
-  const smallColor = isMossy ? 0x558b2f : COLORS.rockDark;
-
-  rock.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-
-    if (child.name === 'main') {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: mainColor,
-        roughness: 0.9,
-        flatShading: true
-      });
-      // Add random rotation to main rock
-      mesh.rotation.set(
-        Math.random() * Math.PI,
-        Math.random() * Math.PI,
-        Math.random() * Math.PI
-      );
-    } else if (child.name.startsWith('small_')) {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: smallColor,
-        roughness: 0.95,
-        flatShading: true
-      });
-      mesh.rotation.set(Math.random(), Math.random(), Math.random());
-    }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-  });
-
-  return rock;
-}
-
-function createFlowerMesh(variant: number): THREE.Group {
-  const flower = modelCache['flower'].clone();
-
-  const flowerColor = COLORS.flowerColors[variant];
-
-  flower.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-
-    if (child.name === 'stem' || child.name.startsWith('leaf_')) {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: COLORS.stem,
-        roughness: child.name === 'stem' ? 0.8 : 0.7
-      });
-    } else if (child.name.startsWith('petal_')) {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: flowerColor,
-        roughness: 0.6
-      });
-    } else if (child.name === 'center') {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: COLORS.flowerCenter,
-        roughness: 0.5
-      });
-    }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-  });
-
-  return flower;
-}
-
-function createPlayerMesh(): THREE.Group {
-  const player = modelCache['player'].clone();
-
-  player.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-
-    if (child.name === 'torso') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.shirt, roughness: 0.7 });
-    } else if (child.name === 'head') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.skin, roughness: 0.6 });
-    } else if (child.name === 'hatBrim' || child.name === 'hatTop') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.hat, roughness: 0.8 });
-    } else if (child.name === 'leftEye' || child.name === 'rightEye') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    } else if (child.name === 'leftArm' || child.name === 'rightArm') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.skin, roughness: 0.6 });
-    } else if (child.name === 'leftLeg' || child.name === 'rightLeg') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: COLORS.pants, roughness: 0.8 });
-    } else if (child.name === 'leftFoot' || child.name === 'rightFoot') {
-      mesh.material = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 });
-    }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-  });
-
-  return player;
-}
-
-function createCloudMesh(): THREE.Group {
-  // Pick a random cloud variant (1-3)
-  const variant = 1 + Math.floor(Math.random() * 3);
-  const cloud = modelCache[`cloud${variant}`].clone();
-
-  // Apply random Y rotation for variety
-  cloud.rotation.y = Math.random() * Math.PI * 2;
-
-  // Apply slight random scale variation
-  const scaleVariation = 0.9 + Math.random() * 0.2;
-  cloud.scale.multiplyScalar(scaleVariation);
-
-  return cloud;
-}
-
-// ============================================================================
-// WORLD GENERATION
-// ============================================================================
-
-function createTile(x: number, y: number): Tile {
-  const distFromCenter = Math.sqrt((x - WORLD_SIZE / 2) ** 2 + (y - WORLD_SIZE / 2) ** 2);
-  const distFromEdge = Math.min(x, y, WORLD_SIZE - 1 - x, WORLD_SIZE - 1 - y);
-
-  let type: 'grass' | 'water' | 'path' = 'grass';
-
-  if (distFromCenter < 3) {
-    type = 'water';
-  } else if (Math.random() < 0.05 && distFromEdge > 1) {
-    type = 'path';
-  }
-
-  const mesh = createTileMesh(type, x, y);
-  scene.add(mesh);
-
-  let decoration: Decoration | null = null;
-
-  if (type === 'grass' && distFromEdge > 0) {
-    const rand = Math.random();
-    const offsetX = (Math.random() - 0.5) * 0.6;
-    const offsetY = (Math.random() - 0.5) * 0.6;
-
-    if (rand < 0.30) {
-      const variant = Math.floor(Math.random() * 3);
-      const treeMesh = createTreeMesh(variant);
-      treeMesh.position.set(x + 0.5 + offsetX, 0, y + 0.5 + offsetY);
-      scene.add(treeMesh);
-      decoration = {
-        type: 'tree',
-        variant,
-        offsetX,
-        offsetY,
-        health: 100,
-        mesh: treeMesh,
-        state: 'healthy'
-      };
-    } else if (rand < 0.35) {
-      const variant = Math.floor(Math.random() * 2);
-      const rockMesh = createRockMesh(variant);
-      rockMesh.position.set(x + 0.5 + offsetX, 0, y + 0.5 + offsetY);
-      scene.add(rockMesh);
-      decoration = {
-        type: 'rock',
-        variant,
-        offsetX,
-        offsetY,
-        mesh: rockMesh
-      };
-    } else if (rand < 0.45) {
-      const variant = Math.floor(Math.random() * 4);
-      const flowerMesh = createFlowerMesh(variant);
-      flowerMesh.position.set(x + 0.5 + offsetX, 0, y + 0.5 + offsetY);
-      scene.add(flowerMesh);
-      flowerMeshes.push(flowerMesh);
-      flowerStates.push({
-        basePhase: Math.random() * Math.PI * 2,
-        disturbance: 0,
-        disturbanceEndTime: 0,
-        triggeredForCurrentVisit: false
-      });
-      decoration = {
-        type: 'flower',
-        variant,
-        offsetX,
-        offsetY,
-        mesh: flowerMesh
-      };
-    }
-  }
-
-  return { x, y, type, decoration, mesh };
-}
-
-function generateWorld(): void {
-  world = [];
-  for (let x = 0; x < WORLD_SIZE; x++) {
-    world[x] = [];
-    for (let y = 0; y < WORLD_SIZE; y++) {
-      world[x][y] = createTile(x, y);
-    }
-  }
-
-  createGridLines();
-}
-
-function getSpawnPosition(): { x: number; y: number } {
-  const validPositions: { x: number; y: number }[] = [];
-
-  for (let x = 0; x < WORLD_SIZE; x++) {
-    for (let y = 0; y < WORLD_SIZE; y++) {
-      const tile = world[x][y];
-      if (tile.type !== 'water' && (!tile.decoration || (tile.decoration.type !== 'tree' && tile.decoration.type !== 'rock'))) {
-        validPositions.push({ x, y });
-      }
-    }
-  }
-
-  if (validPositions.length > 0) {
-    const randomIndex = Math.floor(Math.random() * validPositions.length);
-    return validPositions[randomIndex];
-  }
-
-  return { x: Math.floor(WORLD_SIZE / 2), y: Math.floor(WORLD_SIZE / 2) };
-}
-
-function createPlayer(x: number, y: number): Player {
-  const mesh = createPlayerMesh();
-  mesh.position.set(x + 0.5, 0, y + 0.5);
-  scene.add(mesh);
-
-  return {
-    x,
-    y,
-    targetX: x,
-    targetY: y,
-    prevTileX: x,
-    prevTileY: y,
-    direction: 0,
-    targetDirection: 0,
-    isMoving: false,
-    isRotating: false,
-    animTime: 0,
-    mesh
-  };
-}
-
-// ============================================================================
-// INPUT HANDLING
-// ============================================================================
 
 function createInputHandler(): InputState {
   const pressed: InputState = { up: false, down: false, left: false, right: false };
@@ -752,86 +122,204 @@ function createInputHandler(): InputState {
 }
 
 // ============================================================================
-// GAME LOGIC
+// RENDERER SETUP
 // ============================================================================
 
-function isWalkable(x: number, y: number): boolean {
-  const tileX = Math.floor(x);
-  const tileY = Math.floor(y);
-  if (tileX < 0 || tileX >= world.length || tileY < 0 || tileY >= world[0].length) return false;
-  const tile = world[tileX][tileY];
-  if (tile.type === 'water') return false;
-  if (!tile.decoration) return true;
-  if (tile.decoration.type === 'rock') return false;
-  if (tile.decoration.type === 'tree') {
-    return (tile.decoration.health ?? 100) <= 0;
-  }
-  return true;
+function updateCameraPosition(): void {
+  const { camera, orbitState } = GameState;
+  if (!camera || !orbitState) return;
+
+  const x = CAMERA_DISTANCE * Math.sin(orbitState.polar) * Math.sin(orbitState.azimuth);
+  const y = CAMERA_DISTANCE * Math.cos(orbitState.polar);
+  const z = CAMERA_DISTANCE * Math.sin(orbitState.polar) * Math.cos(orbitState.azimuth);
+  camera.position.set(x + WORLD_SIZE / 2, y, z + WORLD_SIZE / 2);
+  camera.lookAt(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
 }
 
-function damageTree(x: number, y: number): boolean {
-  const tileX = Math.floor(x);
-  const tileY = Math.floor(y);
-  if (tileX < 0 || tileX >= world.length || tileY < 0 || tileY >= world[0].length) return false;
-  const tile = world[tileX][tileY];
-  if (tile.decoration && tile.decoration.type === 'tree' && (tile.decoration.health ?? 100) > 0) {
-    tile.decoration.health = (tile.decoration.health ?? 100) - 34;
-    tile.decoration.shakeEndTime = Date.now() + 150;
-    if (tile.decoration.health <= 0) {
-      // Start falling animation
-      tile.decoration.state = 'falling';
-      tile.decoration.fallAngle = 0;
-      
-      // Calculate fall direction (away from player)
-      const dx = tile.x + 0.5 - player.x;
-      const dy = tile.y + 0.5 - player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      tile.decoration.fallDirection = new THREE.Vector3(dx / dist, 0, dy / dist);
-      tile.decoration.opacity = 1;
-      
-      fallingTrees.push(tile.decoration);
-      return true;
+function setupOrbitControls(): void {
+  const { renderer, orbitState } = GameState;
+  if (!renderer || !orbitState) return;
+
+  const canvas = renderer.domElement;
+
+  canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    orbitState.isDragging = true;
+    orbitState.previousMouseX = e.clientX;
+    orbitState.previousMouseY = e.clientY;
+  });
+
+  canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    if (!orbitState.isDragging) return;
+    const deltaX = e.clientX - orbitState.previousMouseX;
+    const deltaY = e.clientY - orbitState.previousMouseY;
+    orbitState.targetAzimuth -= deltaX * 0.005;
+    orbitState.targetPolar -= deltaY * 0.005;
+    orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
+    orbitState.previousMouseX = e.clientX;
+    orbitState.previousMouseY = e.clientY;
+  });
+
+  canvas.addEventListener('mouseup', () => orbitState.isDragging = false);
+  canvas.addEventListener('mouseleave', () => orbitState.isDragging = false);
+
+  canvas.addEventListener('touchstart', (e: TouchEvent) => {
+    if (e.touches.length === 1) {
+      orbitState.isDragging = true;
+      orbitState.previousMouseX = e.touches[0].clientX;
+      orbitState.previousMouseY = e.touches[0].clientY;
     }
-    return false;
+  });
+
+  canvas.addEventListener('touchmove', (e: TouchEvent) => {
+    if (!orbitState.isDragging || e.touches.length !== 1) return;
+    const deltaX = e.touches[0].clientX - orbitState.previousMouseX;
+    const deltaY = e.touches[0].clientY - orbitState.previousMouseY;
+    orbitState.targetAzimuth -= deltaX * 0.005;
+    orbitState.targetPolar -= deltaY * 0.005;
+    orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
+    orbitState.previousMouseX = e.touches[0].clientX;
+    orbitState.previousMouseY = e.touches[0].clientY;
+  });
+
+  canvas.addEventListener('touchend', () => orbitState.isDragging = false);
+
+  canvas.addEventListener('wheel', (e: WheelEvent) => {
+    e.preventDefault();
+    const zoomDelta = e.deltaY * 0.001;
+    orbitState.targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, orbitState.targetZoom + zoomDelta));
+  }, { passive: false });
+}
+
+function updateOrbitControls(): void {
+  const { camera, orbitState, canvasWidth, canvasHeight } = GameState;
+  if (!camera || !orbitState) return;
+
+  const damping = 0.1;
+  orbitState.azimuth += (orbitState.targetAzimuth - orbitState.azimuth) * damping;
+  orbitState.polar += (orbitState.targetPolar - orbitState.polar) * damping;
+  orbitState.zoom += (orbitState.targetZoom - orbitState.zoom) * damping;
+
+  const aspect = canvasWidth / canvasHeight;
+  const frustumSize = 15 / orbitState.zoom;
+  camera.left = -frustumSize * aspect;
+  camera.right = frustumSize * aspect;
+  camera.top = frustumSize;
+  camera.bottom = -frustumSize;
+  camera.updateProjectionMatrix();
+
+  updateCameraPosition();
+}
+
+function setupLighting(scene: THREE.Scene): void {
+  const ambientLight = new THREE.AmbientLight(0xb4d4ff, 0.5);
+  scene.add(ambientLight);
+
+  const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5c3d, 0.3);
+  scene.add(hemiLight);
+
+  const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+  dirLight.position.set(15, 25, 15);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
+  dirLight.shadow.camera.near = 0.5;
+  dirLight.shadow.camera.far = 100;
+  dirLight.shadow.camera.left = -30;
+  dirLight.shadow.camera.right = 30;
+  dirLight.shadow.camera.top = 30;
+  dirLight.shadow.camera.bottom = -30;
+  dirLight.shadow.bias = -0.0001;
+
+  scene.add(dirLight);
+}
+
+function onWindowResize(): void {
+  const { camera, renderer, orbitState } = GameState;
+  if (!camera || !renderer || !orbitState) return;
+
+  GameState.canvasWidth = window.innerWidth;
+  GameState.canvasHeight = window.innerHeight;
+
+  const aspect = GameState.canvasWidth / GameState.canvasHeight;
+  const frustumSize = 15 / orbitState.zoom;
+
+  camera.left = -frustumSize * aspect;
+  camera.right = frustumSize * aspect;
+  camera.top = frustumSize;
+  camera.bottom = -frustumSize;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(GameState.canvasWidth, GameState.canvasHeight);
+}
+
+function initThreeJS(): void {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(COLORS.sky);
+
+  const aspect = GameState.canvasWidth / GameState.canvasHeight;
+  const frustumSize = 15;
+  const camera = new THREE.OrthographicCamera(
+    -frustumSize * aspect,
+    frustumSize * aspect,
+    frustumSize,
+    -frustumSize,
+    0.1,
+    1000
+  );
+
+  const orbitState = createOrbitState();
+
+  GameState.scene = scene;
+  GameState.camera = camera;
+  GameState.orbitState = orbitState;
+
+  updateCameraPosition();
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(GameState.canvasWidth, GameState.canvasHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  GameState.renderer = renderer;
+
+  const container = document.getElementById('game-container');
+  if (container) {
+    container.insertBefore(renderer.domElement, container.firstChild);
   }
-  return false;
+
+  setupOrbitControls();
+  window.addEventListener('resize', onWindowResize);
+  setupLighting(scene);
 }
 
-// Helper to normalize angle to [-PI, PI]
-function normalizeAngle(angle: number): number {
-  while (angle > Math.PI) angle -= Math.PI * 2;
-  while (angle < -Math.PI) angle += Math.PI * 2;
-  return angle;
-}
-
-// Helper to get shortest angle difference
-function angleDifference(from: number, to: number): number {
-  return normalizeAngle(to - from);
-}
+// ============================================================================
+// PLAYER LOGIC
+// ============================================================================
 
 function updatePlayer(deltaTime: number): void {
+  const { player, input, world } = GameState;
+  if (!player || !input) return;
+
   const dt = deltaTime / 1000;
 
-  // Handle rotation first
   if (player.isRotating) {
     const diff = angleDifference(player.direction, player.targetDirection);
-    const rotationStep = ROTATION_SPEED * dt;
-    
-    if (Math.abs(diff) < rotationStep) {
-      // Rotation complete
+    const step = ROTATION_SPEED * dt;
+
+    if (Math.abs(diff) < step) {
       player.direction = player.targetDirection;
       player.isRotating = false;
-      // Now start moving if we have a target
       if (player.targetX !== player.x || player.targetY !== player.y) {
-        isMoving = true;
+        GameState.isMoving = true;
         player.isMoving = true;
       }
     } else {
-      // Continue rotating
-      player.direction += Math.sign(diff) * rotationStep;
+      player.direction += Math.sign(diff) * step;
       player.direction = normalizeAngle(player.direction);
     }
-  } else if (isMoving) {
+
+  } else if (GameState.isMoving) {
     const dx = player.targetX - player.x;
     const dy = player.targetY - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -839,7 +327,7 @@ function updatePlayer(deltaTime: number): void {
     if (dist < 0.01) {
       player.x = player.targetX;
       player.y = player.targetY;
-      isMoving = false;
+      GameState.isMoving = false;
       player.isMoving = false;
     } else {
       const step = Math.min(MOVE_SPEED * dt, dist);
@@ -848,6 +336,7 @@ function updatePlayer(deltaTime: number): void {
       player.animTime += deltaTime * 0.01;
       player.isMoving = true;
     }
+
   } else {
     let dx = 0, dy = 0;
     if (input.up) dy -= 1;
@@ -858,61 +347,55 @@ function updatePlayer(deltaTime: number): void {
     if (dx !== 0 || dy !== 0) {
       const targetX = Math.round(player.x) + dx;
       const targetY = Math.round(player.y) + dy;
-      const newDirection = Math.atan2(dy, dx);
+      const tileX = Math.floor(targetX);
+      const tileY = Math.floor(targetY);
 
-      if (isWalkable(targetX, targetY)) {
-        player.prevTileX = Math.round(player.x);
-        player.prevTileY = Math.round(player.y);
-        player.targetX = targetX;
-        player.targetY = targetY;
-        player.targetDirection = newDirection;
-        
-        // Check if we need to rotate first
-        const diff = Math.abs(angleDifference(player.direction, newDirection));
-        if (diff > 0.1) {
-          // Need to rotate first
-          player.isRotating = true;
+      if (tileX >= 0 && tileX < WORLD_SIZE && tileY >= 0 && tileY < WORLD_SIZE) {
+        const tile = world[tileX][tileY];
+
+        if (tile.isWalkable) {
+          player.prevTileX = Math.round(player.x);
+          player.prevTileY = Math.round(player.y);
+          player.targetX = targetX;
+          player.targetY = targetY;
+          player.targetDirection = Math.atan2(dy, dx);
+
+          const diff = Math.abs(angleDifference(player.direction, player.targetDirection));
+          if (diff > 0.1) {
+            player.isRotating = true;
+          } else {
+            player.direction = player.targetDirection;
+            GameState.isMoving = true;
+            player.isMoving = true;
+          }
         } else {
-          // Already facing the right direction, start moving immediately
-          player.direction = newDirection;
-          isMoving = true;
-          player.isMoving = true;
-        }
-      } else {
-        // Blocked - face the obstacle (rotate towards it)
-        player.targetDirection = newDirection;
-        const diff = Math.abs(angleDifference(player.direction, newDirection));
-        if (diff > 0.1) {
-          player.isRotating = true;
-        } else {
-          player.direction = newDirection;
-        }
-        
-        // Try to chop tree if facing it
-        if (!player.isRotating && chopCooldown <= 0) {
-          const tileX = Math.floor(targetX);
-          const tileY = Math.floor(targetY);
-          if (tileX >= 0 && tileX < world.length && tileY >= 0 && tileY < world[0].length) {
-            const tile = world[tileX][tileY];
-            if (tile.decoration && tile.decoration.type === 'tree') {
-              damageTree(targetX, targetY);
-              chopCooldown = 300;
-            }
+          player.targetDirection = Math.atan2(dy, dx);
+          const diff = Math.abs(angleDifference(player.direction, player.targetDirection));
+          if (diff > 0.1) {
+            player.isRotating = true;
+          } else {
+            player.direction = player.targetDirection;
+          }
+
+          // Try to chop tree
+          if (!player.isRotating && GameState.chopCooldown <= 0 && tile.type === 'tree') {
+            const dx = tile.x + 0.5 - player.x;
+            const dy = tile.y + 0.5 - player.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            tile.damage(new THREE.Vector3(dx / dist, 0, dy / dist));
+            GameState.chopCooldown = 300;
           }
         }
       }
     }
   }
 
-  // Update player mesh position
+  // Update mesh position
   const bobOffset = player.isMoving ? Math.sin(player.animTime * 10) * 0.05 : 0;
   player.mesh.position.set(player.x + 0.5, bobOffset, player.y + 0.5);
-
-  // Update player rotation to face movement direction
-  // In our coordinate system: +X is right, +Z is down
   player.mesh.rotation.y = -player.direction + Math.PI / 2;
 
-  // Animate arms and legs when moving
+  // Animate limbs
   const leftArm = player.mesh.getObjectByName('leftArm') as THREE.Mesh;
   const rightArm = player.mesh.getObjectByName('rightArm') as THREE.Mesh;
   const leftLeg = player.mesh.getObjectByName('leftLeg') as THREE.Mesh;
@@ -932,260 +415,45 @@ function updatePlayer(deltaTime: number): void {
   }
 
   // Update highlight position with smooth transition
-  const highlightTargetX = isMoving ? player.targetX : Math.floor(player.x);
-  const highlightTargetY = isMoving ? player.targetY : Math.floor(player.y);
+  const highlightTargetX = GameState.isMoving ? player.targetX : Math.floor(player.x);
+  const highlightTargetY = GameState.isMoving ? player.targetY : Math.floor(player.y);
   
-  // Lerp highlight towards target position
-  const highlightSpeed = 12; // Speed of highlight transition
-  highlightCurrentX += (highlightTargetX - highlightCurrentX) * highlightSpeed * dt;
-  highlightCurrentY += (highlightTargetY - highlightCurrentY) * highlightSpeed * dt;
+  const highlightSpeed = 12;
+  GameState.highlightCurrentX += (highlightTargetX - GameState.highlightCurrentX) * highlightSpeed * dt;
+  GameState.highlightCurrentY += (highlightTargetY - GameState.highlightCurrentY) * highlightSpeed * dt;
   
-  // Snap if very close to target
-  if (Math.abs(highlightTargetX - highlightCurrentX) < 0.01) highlightCurrentX = highlightTargetX;
-  if (Math.abs(highlightTargetY - highlightCurrentY) < 0.01) highlightCurrentY = highlightTargetY;
+  if (Math.abs(highlightTargetX - GameState.highlightCurrentX) < 0.01) GameState.highlightCurrentX = highlightTargetX;
+  if (Math.abs(highlightTargetY - GameState.highlightCurrentY) < 0.01) GameState.highlightCurrentY = highlightTargetY;
   
-  highlightMesh.position.set(highlightCurrentX, 0.02, highlightCurrentY);
-}
-
-function updateFallingTrees(deltaTime: number): void {
-  const dt = deltaTime / 1000;
-  const now = Date.now();
-
-  for (let i = fallingTrees.length - 1; i >= 0; i--) {
-    const tree = fallingTrees[i];
-
-    if (tree.state === 'falling') {
-      // Increase fall angle
-      tree.fallAngle = (tree.fallAngle ?? 0) + dt * 2.5;
-
-      if (tree.fallAngle >= Math.PI / 2) {
-        tree.fallAngle = Math.PI / 2;
-        tree.state = 'fading';
-      }
-
-      // Apply rotation around the fall direction
-      const dir = tree.fallDirection!;
-      // Rotate around the axis perpendicular to fall direction (cross product with Y-up)
-      // This makes the tree tip over in the direction away from the player
-      const axis = new THREE.Vector3(dir.z, 0, -dir.x).normalize();
-      tree.mesh.setRotationFromAxisAngle(axis, tree.fallAngle);
-      
-      // Also translate the tree slightly in the fall direction as it falls
-      // This makes the base stay roughly in place while the top falls away
-      const fallOffset = Math.sin(tree.fallAngle) * 1.2; // Tree height offset
-      const baseX = tree.mesh.userData.baseX ?? tree.mesh.position.x;
-      const baseZ = tree.mesh.userData.baseZ ?? tree.mesh.position.z;
-      
-      // Store original position on first frame
-      if (tree.mesh.userData.baseX === undefined) {
-        tree.mesh.userData.baseX = tree.mesh.position.x;
-        tree.mesh.userData.baseZ = tree.mesh.position.z;
-      }
-      
-      tree.mesh.position.x = baseX + dir.x * fallOffset * 0.3;
-      tree.mesh.position.z = baseZ + dir.z * fallOffset * 0.3;
-    } else if (tree.state === 'fading') {
-      // Fade out
-      tree.opacity = (tree.opacity ?? 1) - dt * 2;
-
-      if (tree.opacity <= 0) {
-        // Remove tree completely
-        scene.remove(tree.mesh);
-        fallingTrees.splice(i, 1);
-
-        // Clear the decoration from the tile
-        for (let x = 0; x < WORLD_SIZE; x++) {
-          for (let y = 0; y < WORLD_SIZE; y++) {
-            if (world[x][y].decoration === tree) {
-              world[x][y].decoration = null;
-              break;
-            }
-          }
-        }
-        continue;
-      }
-
-      // Update opacity of all meshes in the tree group
-      tree.mesh.traverse((child: THREE.Object3D) => {
-        if ((child as THREE.Mesh).material) {
-          const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
-          if (!material.transparent) {
-            material.transparent = true;
-          }
-          material.opacity = tree.opacity ?? 0;
-        }
-      });
-    }
-  }
-
-  // Update tree shake for trees being chopped
-  for (let x = 0; x < WORLD_SIZE; x++) {
-    for (let y = 0; y < WORLD_SIZE; y++) {
-      const tile = world[x][y];
-      if (tile.decoration && tile.decoration.type === 'tree' && tile.decoration.state === 'healthy') {
-        const health = tile.decoration.health ?? 100;
-        const isShaking = tile.decoration.shakeEndTime !== undefined && now < tile.decoration.shakeEndTime;
-        if (health < 100 && isShaking) {
-          const intensity = (100 - health) / 100 * 0.2;
-          const shake = Math.sin(now / 30) * intensity;
-          tile.decoration.mesh.rotation.z = shake;
-          tile.decoration.mesh.rotation.x = Math.cos(now / 25) * intensity * 0.5;
-        } else {
-          tile.decoration.mesh.rotation.z = 0;
-          tile.decoration.mesh.rotation.x = 0;
-        }
-      }
-    }
+  if (GameState.highlightMesh) {
+    GameState.highlightMesh.position.set(GameState.highlightCurrentX, 0.09, GameState.highlightCurrentY);
   }
 }
 
-// ============================================================================
-// ANIMATIONS
-// ============================================================================
+function updateEntities(deltaTime: number, time: number): void {
+  const { world, trees, flowers, clouds, pollenParticles, pollenSprites } = GameState;
 
-function animateFlowers(time: number): void {
-  const playerTileX = Math.round(player.x);
-  const playerTileY = Math.round(player.y);
-  const now = Date.now();
-
-  flowerMeshes.forEach((flower, index) => {
-    const state = flowerStates[index];
-    const flowerTileX = Math.round(flower.position.x - 0.5);
-    const flowerTileY = Math.round(flower.position.z - 0.5);
-
-    const isOnTile = playerTileX === flowerTileX && playerTileY === flowerTileY;
-    const justEnteredTile = isOnTile && (player.prevTileX !== flowerTileX || player.prevTileY !== flowerTileY) && !isMoving;
-
-    if (justEnteredTile && !state.triggeredForCurrentVisit) {
-      state.disturbance = 0.2;
-      state.disturbanceEndTime = now + 250;
-      state.triggeredForCurrentVisit = true;
+  // Update trees (remove destroyed ones)
+  trees.forEach(tree => tree.update(deltaTime));
+  for (let i = trees.length - 1; i >= 0; i--) {
+    if (trees[i].isDestroyed) {
+      // Update the tile reference
+      const tile = world[trees[i].x][trees[i].y];
+      if (tile.type === 'tree') {
+        // Tile stays a tree but is now walkable (isWalkable is already true)
+      }
+      trees.splice(i, 1);
     }
-
-    if (!isOnTile) {
-      state.triggeredForCurrentVisit = false;
-    }
-
-    if (now > state.disturbanceEndTime) {
-      state.disturbance *= 0.95;
-    }
-
-    const baseSway = Math.sin(time * 0.003 + state.basePhase) * 0.08;
-    const disturbanceSway = Math.sin(time * 0.015 + state.basePhase) * state.disturbance;
-
-    flower.rotation.x = baseSway + disturbanceSway;
-    flower.rotation.z = baseSway * 0.5 + disturbanceSway * 0.5;
-  });
-}
-
-function animateClouds(time: number): void {
-  clouds.forEach((cloud) => {
-    const offset = Math.sin(time * 0.001 * cloud.speed) * cloud.amplitude;
-    cloud.mesh.position.x = cloud.initialX + offset;
-  });
-}
-
-// ============================================================================
-// PARTICLES
-// ============================================================================
-
-const POLLEN_COLORS = [0xfffacd, 0xfff8dc, 0xfffaf0, 0xfffff0, 0xfff5ee, 0xfff, 0xfffdd0];
-const POLLEN_COUNT = 100;
-
-function createPollenParticle(): PollenParticle {
-  const color = POLLEN_COLORS[Math.floor(Math.random() * POLLEN_COLORS.length)];
-  return {
-    x: Math.random() * WORLD_SIZE,
-    y: Math.random() * WORLD_SIZE,
-    z: Math.random() * 3 + 0.5,
-    vx: (Math.random() - 0.5) * 0.002,
-    vy: (Math.random() - 0.5) * 0.002,
-    vz: Math.random() * 0.001 + 0.0005,
-    life: Math.random(),
-    maxLife: 3 + Math.random() * 4,
-    color,
-    size: 0.3 + Math.random() * 0.3,
-    phase: Math.random() * Math.PI * 2
-  };
-}
-
-function initParticles(): void {
-  pollenParticles = [];
-  pollenSprites = [];
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 32;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(16, 16, 14, 0, Math.PI * 2);
-  ctx.fill();
-
-  const texture = new THREE.CanvasTexture(canvas);
-
-  for (let i = 0; i < POLLEN_COUNT; i++) {
-    const particle = createPollenParticle();
-    pollenParticles.push(particle);
-
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      color: particle.color,
-      transparent: true,
-      opacity: 0.2 + Math.random() * 0.7,
-      depthWrite: false
-    });
-
-    const sprite = new THREE.Sprite(material);
-    sprite.position.set(particle.x, particle.z, particle.y);
-    sprite.scale.set(0.03, 0.03, 1.0);
-
-    scene.add(sprite);
-    pollenSprites.push(sprite);
   }
-}
 
-function updateParticles(deltaTime: number, time: number): void {
-  pollenParticles.forEach((p, i) => {
-    p.x += p.vx * deltaTime;
-    p.y += p.vy * deltaTime;
-    p.z += p.vz * deltaTime + Math.sin(time * 0.001 + p.phase) * 0.0005;
-    p.life += deltaTime * 0.001;
+  // Update flowers
+  flowers.forEach(flower => flower.update(time));
 
-    if (p.life >= p.maxLife) {
-      const newP = createPollenParticle();
-      p.x = newP.x;
-      p.y = newP.y;
-      p.z = newP.z;
-      p.vx = newP.vx;
-      p.vy = newP.vy;
-      p.vz = newP.vz;
-      p.life = 0;
-    }
+  // Update clouds
+  clouds.forEach(cloud => cloud.update(time));
 
-    pollenSprites[i].position.set(p.x, p.z, p.y);
-  });
-}
-
-function initClouds(): void {
-  const cloudCount = 4 + Math.floor(Math.random() * 4);
-
-  for (let i = 0; i < cloudCount; i++) {
-    const cloud = createCloudMesh();
-    const x = Math.random() * WORLD_SIZE * 1.5 - WORLD_SIZE * 0.25;
-    const z = Math.random() * WORLD_SIZE;
-    cloud.position.set(x, 8 + Math.random() * 4, z);
-
-    scene.add(cloud);
-
-    clouds.push({
-      mesh: cloud,
-      speed: 0.3 + Math.random() * 0.4,
-      initialX: x,
-      amplitude: 1 + Math.random() * 2
-    });
-  }
+  // Update pollen
+  updatePollenParticles(pollenParticles, pollenSprites, deltaTime, time);
 }
 
 // ============================================================================
@@ -1193,22 +461,20 @@ function initClouds(): void {
 // ============================================================================
 
 function update(deltaTime: number, time: number): void {
-  if (chopCooldown > 0) {
-    chopCooldown -= deltaTime;
+  if (GameState.chopCooldown > 0) {
+    GameState.chopCooldown -= deltaTime;
   }
   updatePlayer(deltaTime);
-  updateFallingTrees(deltaTime);
-  updateParticles(deltaTime, time);
+  updateEntities(deltaTime, time);
 }
 
 function render(time: number): void {
-  animateFlowers(time);
-  animateClouds(time);
+  const { scene, camera, renderer, fps, fpsElement } = GameState;
+  if (!scene || !camera || !renderer) return;
 
   updateOrbitControls();
   renderer.render(scene, camera);
 
-  // Update FPS display
   if (fpsElement) {
     fpsElement.textContent = `FPS: ${Math.round(fps)}`;
   }
@@ -1217,12 +483,12 @@ function render(time: number): void {
 function gameLoop(currentTime: number): void {
   requestAnimationFrame(gameLoop);
 
-  const elapsed = currentTime - lastTime;
+  const elapsed = currentTime - GameState.lastTime;
   if (elapsed < FRAME_INTERVAL) return;
 
   const deltaTime = Math.min(elapsed, 50);
-  fps = 1000 / elapsed;
-  lastTime = currentTime - (elapsed % FRAME_INTERVAL);
+  GameState.fps = 1000 / elapsed;
+  GameState.lastTime = currentTime - (elapsed % FRAME_INTERVAL);
 
   update(deltaTime, currentTime);
   render(currentTime);
@@ -1233,8 +499,7 @@ function gameLoop(currentTime: number): void {
 // ============================================================================
 
 async function init(): Promise<void> {
-  // Create FPS display element
-  fpsElement = document.createElement('div');
+  const fpsElement = document.createElement('div');
   fpsElement.style.position = 'absolute';
   fpsElement.style.top = '36px';
   fpsElement.style.left = '16px';
@@ -1249,36 +514,73 @@ async function init(): Promise<void> {
     container.appendChild(fpsElement);
   }
 
-  // Load models first
-  await loadModels();
+  GameState.fpsElement = fpsElement;
+
+  // Load all models in parallel
+  await Promise.all([
+    loadGrassModel(),
+    loadWaterModel(),
+    loadPathModel(),
+    loadFlowerModel(),
+    loadTreeModel(),
+    loadRockModel(),
+    loadCloudModels(),
+    loadPlayerModel(),
+    loadGameHighlightModel()
+  ]);
 
   // Initialize Three.js
   initThreeJS();
+  const { scene } = GameState;
+  if (!scene) return;
 
   // Generate world
-  generateWorld();
+  GameState.world = generateWorld(scene);
+
+  // Collect flowers and trees for updates
+  for (let x = 0; x < WORLD_SIZE; x++) {
+    for (let y = 0; y < WORLD_SIZE; y++) {
+      const tile = GameState.world[x][y];
+      if (tile.type === 'flower') {
+        GameState.flowers.push(tile);
+      } else if (tile.type === 'tree') {
+        GameState.trees.push(tile);
+      }
+    }
+  }
 
   // Spawn player
-  const spawnPos = getSpawnPosition();
-  player = createPlayer(spawnPos.x, spawnPos.y);
-
-  // Create highlight (after player so we can initialize position)
-  highlightMesh = createHighlight();
-  highlightCurrentX = spawnPos.x;
-  highlightCurrentY = spawnPos.y;
-  highlightMesh.position.set(highlightCurrentX, 0.02, highlightCurrentY);
+  const spawnPos = getSpawnPosition(GameState.world);
+  GameState.player = createPlayer(scene, spawnPos.x, spawnPos.y);
+  
+  // Create highlight mesh (same pattern as original game.ts)
+  const highlightMesh = gameHighlightModel!.clone();
+  highlightMesh.position.y = 0.02;
+  highlightMesh.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.material = new THREE.MeshBasicMaterial({ color: 0xffeb3b });
+    }
+  });
+  scene.add(highlightMesh);
+  GameState.highlightMesh = highlightMesh;
+  GameState.highlightCurrentX = spawnPos.x;
+  GameState.highlightCurrentY = spawnPos.y;
+  highlightMesh.position.set(spawnPos.x, 0.09, spawnPos.y);
 
   // Setup input
-  input = createInputHandler();
-
-  // Initialize particles
-  initParticles();
+  GameState.input = createInputHandler();
 
   // Initialize clouds
-  initClouds();
+  GameState.clouds = initClouds(scene);
+
+  // Initialize particles
+  const { particles, sprites } = initParticles(scene);
+  GameState.pollenParticles = particles;
+  GameState.pollenSprites = sprites;
 
   // Start game loop
-  lastTime = performance.now();
+  GameState.lastTime = performance.now();
   requestAnimationFrame(gameLoop);
 }
 
