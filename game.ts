@@ -433,6 +433,17 @@ function createGridLines(): void {
 function createHighlight(): THREE.Group {
   const highlight = modelCache['highlight'].clone();
   highlight.position.y = 0.02;
+
+  // Apply yellow color to the highlight material
+  highlight.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.material = new THREE.MeshBasicMaterial({
+        color: COLORS.highlight
+      });
+    }
+  });
+
   scene.add(highlight);
   return highlight;
 }
@@ -1152,7 +1163,7 @@ function initClouds(): void {
     const cloud = createCloudMesh();
     const x = Math.random() * WORLD_SIZE * 1.5 - WORLD_SIZE * 0.25;
     const z = Math.random() * WORLD_SIZE;
-    cloud.position.set(x, 2 + Math.random() * 2.5, z);
+    cloud.position.set(x, 8 + Math.random() * 4, z);
 
     scene.add(cloud);
 
