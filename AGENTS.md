@@ -38,10 +38,31 @@ External libraries (like Three.js) are loaded via `<script>` tags as UMD/global 
 - TypeScript accesses them via `declare const` declarations
 - No `import`/`export` statements - Babel standalone doesn't handle ES modules
 
+The exception is `GLTFLoader` which requires ES modules and is loaded via an import map.
+
 Example for Three.js:
 ```typescript
 // Declare the global THREE namespace (provided by script tag in index.html)
 declare const THREE: typeof import('three');
+```
+
+### 3D Models
+
+The game loads `.glb` models from the `models/` directory using `GLTFLoader`:
+- Models are loaded asynchronously in `loadModels()` and cached in `modelCache`
+- GLTFLoader is imported as an ES module via the import map in `index.html`
+- Loaded models are cloned for each instance (trees, rocks, flowers, player)
+- Model names should match file names: `tree.glb`, `rock.glb`, `flower.glb`, `player.glb`
+
+Example model loading:
+```typescript
+async function loadModels(): Promise<void> {
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const loader = new (GLTFLoader as any)();
+  loader.load(`models/${name}.glb`, (gltf: any) => {
+    modelCache[name] = gltf.scene;
+  });
+}
 ```
 
 ## Build/Lint/Test Commands
@@ -85,6 +106,7 @@ The architecture must remain: serve files → browser fetches `.ts` → Babel tr
 - `game.ts` - Main game logic (single-file architecture)
 - `index.html` - Entry point, loads and transpiles TypeScript
 - `style.css` - Game styling
+- `models/` - Directory containing `.glb` 3D model files
 
 ### TypeScript Conventions
 
@@ -210,12 +232,13 @@ The game uses `requestAnimationFrame` for the main loop:
 
 ### 3D Models
 
-All game objects are created procedurally using Three.js geometries:
-- **Tiles**: `BoxGeometry` for ground tiles
-- **Trees**: `CylinderGeometry` (trunk/roots) + `ConeGeometry` (foliage layers)
-- **Rocks**: `DodecahedronGeometry` with flat shading
-- **Flowers**: `CylinderGeometry` (stem) + `SphereGeometry` (petals/center)
-- **Player**: Combination of `SphereGeometry`, `BoxGeometry`, `CylinderGeometry`, `ConeGeometry`
+All game objects use `.glb` models loaded from the `models/` directory:
+- **Trees**: Loaded from `tree.glb` - variants distinguished by color
+- **Rocks**: Loaded from `rock.glb` - mossy variants exist
+- **Flowers**: Loaded from `flower.glb` - 4 color variants
+- **Player**: Loaded from `player.glb` - humanoid character
+
+Models are cloned per instance and material properties are applied dynamically.
 
 ### Camera
 
