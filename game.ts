@@ -28,6 +28,7 @@ interface Decoration {
   fallAngle?: number;
   fallDirection?: THREE.Vector3;
   opacity?: number;
+  shakeEndTime?: number;
 }
 
 interface Player {
@@ -836,6 +837,7 @@ function damageTree(x: number, y: number): boolean {
   const tile = world[tileX][tileY];
   if (tile.decoration && tile.decoration.type === 'tree' && (tile.decoration.health ?? 100) > 0) {
     tile.decoration.health = (tile.decoration.health ?? 100) - 34;
+    tile.decoration.shakeEndTime = Date.now() + 150;
     if (tile.decoration.health <= 0) {
       // Start falling animation
       tile.decoration.state = 'falling';
@@ -1073,7 +1075,8 @@ function updateFallingTrees(deltaTime: number): void {
       const tile = world[x][y];
       if (tile.decoration && tile.decoration.type === 'tree' && tile.decoration.state === 'healthy') {
         const health = tile.decoration.health ?? 100;
-        if (health < 100 && chopCooldown > 0) {
+        const isShaking = tile.decoration.shakeEndTime !== undefined && now < tile.decoration.shakeEndTime;
+        if (health < 100 && isShaking) {
           const intensity = (100 - health) / 100 * 0.2;
           const shake = Math.sin(now / 30) * intensity;
           tile.decoration.mesh.rotation.z = shake;
