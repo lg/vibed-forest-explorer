@@ -24,6 +24,7 @@ const FRAME_INTERVAL = 1000 / TARGET_FPS;
 const HOVER_HIGHLIGHT_OPACITY = 0.3;
 const TREE_HOVER_HIGHLIGHT_COLOR = 0x00ff00;
 const WALKABLE_HOVER_HIGHLIGHT_COLOR = 0xffeb3b;
+const ROCK_HOVER_HIGHLIGHT_COLOR = 0x808080;
 const TREE_HOVER_HIGHLIGHT_OPACITY = 1.0;
 const CLICK_DRAG_THRESHOLD = 5;
 
@@ -80,7 +81,6 @@ const GameState = {
   hoverHighlightMesh: null as THREE.Group | null,
   hoverTileX: -1,
   hoverTileY: -1,
-  isMouseDown: false,
 
   flowers: [] as Flower[],
   trees: [] as Tree[],
@@ -162,8 +162,6 @@ function setupOrbitControls(): void {
     orbitState.previousMouseX = e.clientX;
     orbitState.previousMouseY = e.clientY;
     orbitState.isClick = true;
-    GameState.isMouseDown = true;
-    initiateActionAtHoveredTile();
   });
 
   canvas.addEventListener('mousemove', (e: MouseEvent) => {
@@ -188,13 +186,11 @@ function setupOrbitControls(): void {
     }
     orbitState.isDragging = false;
     orbitState.isClick = false;
-    GameState.isMouseDown = false;
   });
 
   canvas.addEventListener('mouseleave', () => {
     orbitState.isDragging = false;
     orbitState.isClick = false;
-    GameState.isMouseDown = false;
     if (GameState.hoverHighlightMesh) {
       GameState.hoverHighlightMesh.visible = false;
     }
@@ -208,8 +204,6 @@ function setupOrbitControls(): void {
       orbitState.previousMouseX = e.touches[0].clientX;
       orbitState.previousMouseY = e.touches[0].clientY;
       orbitState.isClick = true;
-      GameState.isMouseDown = true;
-      initiateActionAtHoveredTile();
     }
   });
 
@@ -234,7 +228,6 @@ function setupOrbitControls(): void {
     }
     orbitState.isDragging = false;
     orbitState.isClick = false;
-    GameState.isMouseDown = false;
   });
 
   canvas.addEventListener('wheel', (e: WheelEvent) => {
@@ -341,6 +334,7 @@ function updateHoverHighlight(e?: MouseEvent | TouchEvent): void {
 
   const tile = world[tileX][tileY];
   const isHealthyTree = tile.type === 'tree' && !tile.isWalkable;
+  const isRock = tile.type === 'rock';
 
   hoverHighlightMesh.visible = true;
   hoverHighlightMesh.position.set(tileX, 0.09, tileY);
@@ -352,6 +346,9 @@ function updateHoverHighlight(e?: MouseEvent | TouchEvent): void {
       if (isHealthyTree) {
         material.color.setHex(TREE_HOVER_HIGHLIGHT_COLOR);
         material.opacity = TREE_HOVER_HIGHLIGHT_OPACITY;
+      } else if (isRock) {
+        material.color.setHex(ROCK_HOVER_HIGHLIGHT_COLOR);
+        material.opacity = 1.0;
       } else {
         material.color.setHex(WALKABLE_HOVER_HIGHLIGHT_COLOR);
         material.opacity = HOVER_HIGHLIGHT_OPACITY;
@@ -368,6 +365,10 @@ function initiateActionAtHoveredTile(): void {
   if (!player) return;
   if (hoverTileX < 0 || hoverTileY < 0) return;
   if (GameState.isMoving || GameState.isRotating) return;
+
+  if (Math.round(player.x) === hoverTileX && Math.round(player.y) === hoverTileY) {
+    return;
+  }
 
   const dx = hoverTileX - player.x;
   const dy = hoverTileY - player.y;
@@ -591,8 +592,6 @@ function updatePlayer(deltaTime: number): void {
           }
         }
       }
-    } else if (GameState.isMouseDown) {
-      initiateActionAtHoveredTile();
     }
   }
 

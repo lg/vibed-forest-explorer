@@ -37,7 +37,7 @@ Then open http://localhost:3000 (or http://localhost:8000 for Python)
 
 | Action | Input |
 |--------|-------|
-| Move | Arrow Keys / WASD |
+| Move | Click tile / Arrow Keys / WASD |
 | Rotate Camera | Mouse Drag |
 | Zoom | Scroll Wheel |
 
