@@ -8,6 +8,10 @@
   <img src="screenshot.png" alt="Game Screenshot" width="800">
 </p>
 
+<p align="center">
+  <a href="https://lg.github.io/vibed-forest-explorer/"><strong>Play Now</strong></a>
+</p>
+
 A browser-based 3D forest exploration game. Wander through a procedurally generated forest, chop down trees, and enjoy the peaceful pretentious atmosphere.
 
 ## Features
