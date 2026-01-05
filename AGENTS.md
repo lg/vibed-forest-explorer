@@ -237,6 +237,17 @@ by Babel at runtime. Do not add import/export statements.
 - **3D coordinates**: Three.js scene with Y-up convention
 - World center is at `(WORLD_SIZE/2, 0, WORLD_SIZE/2)`
 
+### Height Positioning Guidelines
+
+**CRITICAL**: When placing any object on top of tiles (highlights, grid lines, particles, etc.), always use a minimum Y position of `0.1`. Lower values cause z-fighting and visibility issues with the ground plane.
+
+Examples:
+- **Grid lines**: `y = 0.1`
+- **Player highlight**: `y = 0.09`
+- **Hover highlight**: `y = 0.09`
+
+Never use `y = 0` or values below `0.1` for objects that should appear on top of tiles.
+
 ### Game Loop
 
 The game uses `requestAnimationFrame` for the main loop:
