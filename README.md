@@ -46,3 +46,7 @@ Then open http://localhost:3000 (or http://localhost:8000 for Python)
 **Run locally**: `bunx serve .` then open `index.html`
 
 **Lint**: `bunx oxlint . --ignore-path .gitignore`
+
+## License
+
+MIT License
