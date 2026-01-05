@@ -21,6 +21,12 @@ const ROTATION_SPEED = 25;
 const TARGET_FPS = 60;
 const FRAME_INTERVAL = 1000 / TARGET_FPS;
 
+const HOVER_HIGHLIGHT_OPACITY = 0.3;
+const TREE_HOVER_HIGHLIGHT_COLOR = 0x00ff00;
+const WALKABLE_HOVER_HIGHLIGHT_COLOR = 0xffeb3b;
+const TREE_HOVER_HIGHLIGHT_OPACITY = 1.0;
+const CLICK_DRAG_THRESHOLD = 5;
+
 const ISO_AZIMUTH = Math.PI / 4;
 const ISO_POLAR = Math.PI / 3;
 const CAMERA_DISTANCE = 25;
@@ -49,6 +55,7 @@ interface OrbitState {
   targetPolar: number;
   zoom: number;
   targetZoom: number;
+  isClick: boolean;
 }
 
 // ============================================================================
@@ -67,6 +74,13 @@ const GameState = {
   highlightCurrentX: 0,
   highlightCurrentY: 0,
   input: null as InputState | null,
+
+  raycaster: new THREE.Raycaster(),
+  mouse: new THREE.Vector2(),
+  hoverHighlightMesh: null as THREE.Group | null,
+  hoverTileX: -1,
+  hoverTileY: -1,
+  isMouseDown: false,
 
   flowers: [] as Flower[],
   trees: [] as Tree[],
@@ -99,7 +113,8 @@ function createOrbitState(): OrbitState {
     targetAzimuth: ISO_AZIMUTH,
     targetPolar: ISO_POLAR,
     zoom: DEFAULT_ZOOM,
-    targetZoom: DEFAULT_ZOOM
+    targetZoom: DEFAULT_ZOOM,
+    isClick: false
   };
 }
 
@@ -146,27 +161,55 @@ function setupOrbitControls(): void {
     orbitState.isDragging = true;
     orbitState.previousMouseX = e.clientX;
     orbitState.previousMouseY = e.clientY;
+    orbitState.isClick = true;
+    GameState.isMouseDown = true;
+    initiateActionAtHoveredTile();
   });
 
   canvas.addEventListener('mousemove', (e: MouseEvent) => {
-    if (!orbitState.isDragging) return;
-    const deltaX = e.clientX - orbitState.previousMouseX;
-    const deltaY = e.clientY - orbitState.previousMouseY;
-    orbitState.targetAzimuth -= deltaX * 0.005;
-    orbitState.targetPolar -= deltaY * 0.005;
-    orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
-    orbitState.previousMouseX = e.clientX;
-    orbitState.previousMouseY = e.clientY;
+    if (orbitState.isDragging) {
+      const deltaX = e.clientX - orbitState.previousMouseX;
+      const deltaY = e.clientY - orbitState.previousMouseY;
+      if (Math.abs(deltaX) > CLICK_DRAG_THRESHOLD || Math.abs(deltaY) > CLICK_DRAG_THRESHOLD) {
+        orbitState.isClick = false;
+      }
+      orbitState.targetAzimuth -= deltaX * 0.005;
+      orbitState.targetPolar -= deltaY * 0.005;
+      orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
+      orbitState.previousMouseX = e.clientX;
+      orbitState.previousMouseY = e.clientY;
+    }
+    updateHoverHighlight(e);
   });
 
-  canvas.addEventListener('mouseup', () => orbitState.isDragging = false);
-  canvas.addEventListener('mouseleave', () => orbitState.isDragging = false);
+  canvas.addEventListener('mouseup', () => {
+    if (orbitState.isClick) {
+      initiateActionAtHoveredTile();
+    }
+    orbitState.isDragging = false;
+    orbitState.isClick = false;
+    GameState.isMouseDown = false;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    orbitState.isDragging = false;
+    orbitState.isClick = false;
+    GameState.isMouseDown = false;
+    if (GameState.hoverHighlightMesh) {
+      GameState.hoverHighlightMesh.visible = false;
+    }
+    GameState.hoverTileX = -1;
+    GameState.hoverTileY = -1;
+  });
 
   canvas.addEventListener('touchstart', (e: TouchEvent) => {
     if (e.touches.length === 1) {
       orbitState.isDragging = true;
       orbitState.previousMouseX = e.touches[0].clientX;
       orbitState.previousMouseY = e.touches[0].clientY;
+      orbitState.isClick = true;
+      GameState.isMouseDown = true;
+      initiateActionAtHoveredTile();
     }
   });
 
@@ -174,14 +217,25 @@ function setupOrbitControls(): void {
     if (!orbitState.isDragging || e.touches.length !== 1) return;
     const deltaX = e.touches[0].clientX - orbitState.previousMouseX;
     const deltaY = e.touches[0].clientY - orbitState.previousMouseY;
+    if (Math.abs(deltaX) > CLICK_DRAG_THRESHOLD || Math.abs(deltaY) > CLICK_DRAG_THRESHOLD) {
+      orbitState.isClick = false;
+    }
     orbitState.targetAzimuth -= deltaX * 0.005;
     orbitState.targetPolar -= deltaY * 0.005;
     orbitState.targetPolar = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitState.targetPolar));
     orbitState.previousMouseX = e.touches[0].clientX;
     orbitState.previousMouseY = e.touches[0].clientY;
+    updateHoverHighlight(e);
   });
 
-  canvas.addEventListener('touchend', () => orbitState.isDragging = false);
+  canvas.addEventListener('touchend', () => {
+    if (orbitState.isClick) {
+      initiateActionAtHoveredTile();
+    }
+    orbitState.isDragging = false;
+    orbitState.isClick = false;
+    GameState.isMouseDown = false;
+  });
 
   canvas.addEventListener('wheel', (e: WheelEvent) => {
     e.preventDefault();
@@ -231,6 +285,157 @@ function setupLighting(scene: THREE.Scene): void {
   dirLight.shadow.bias = -0.0001;
 
   scene.add(dirLight);
+}
+
+function getCardinalDirection(dx: number, dy: number): number {
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx > 0 ? 0 : Math.PI;
+  } else {
+    return dy > 0 ? Math.PI / 2 : -Math.PI / 2;
+  }
+}
+
+function updateHoverHighlight(e?: MouseEvent | TouchEvent): void {
+  const { camera, raycaster, mouse, world, hoverHighlightMesh, renderer } = GameState;
+  if (!camera || !raycaster || !hoverHighlightMesh || !renderer) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  let clientX: number, clientY: number;
+  if (e) {
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+  } else {
+    return;
+  }
+
+  mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const intersection = new THREE.Vector3();
+  raycaster.ray.intersectPlane(groundPlane, intersection);
+
+  if (!intersection) {
+    hoverHighlightMesh.visible = false;
+    GameState.hoverTileX = -1;
+    GameState.hoverTileY = -1;
+    return;
+  }
+
+  const tileX = Math.floor(intersection.x);
+  const tileY = Math.floor(intersection.z);
+
+  if (tileX < 0 || tileX >= WORLD_SIZE || tileY < 0 || tileY >= WORLD_SIZE) {
+    hoverHighlightMesh.visible = false;
+    GameState.hoverTileX = -1;
+    GameState.hoverTileY = -1;
+    return;
+  }
+
+  const tile = world[tileX][tileY];
+  const isHealthyTree = tile.type === 'tree' && !tile.isWalkable;
+
+  hoverHighlightMesh.visible = true;
+  hoverHighlightMesh.position.set(tileX, 0.09, tileY);
+
+  hoverHighlightMesh.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh) {
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      if (isHealthyTree) {
+        material.color.setHex(TREE_HOVER_HIGHLIGHT_COLOR);
+        material.opacity = TREE_HOVER_HIGHLIGHT_OPACITY;
+      } else {
+        material.color.setHex(WALKABLE_HOVER_HIGHLIGHT_COLOR);
+        material.opacity = HOVER_HIGHLIGHT_OPACITY;
+      }
+    }
+  });
+
+  GameState.hoverTileX = tileX;
+  GameState.hoverTileY = tileY;
+}
+
+function initiateActionAtHoveredTile(): void {
+  const { player, hoverTileX, hoverTileY, world, chopCooldown } = GameState;
+  if (!player) return;
+  if (hoverTileX < 0 || hoverTileY < 0) return;
+  if (GameState.isMoving || GameState.isRotating) return;
+
+  const dx = hoverTileX - player.x;
+  const dy = hoverTileY - player.y;
+
+  let moveX = 0, moveY = 0;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    moveX = dx > 0 ? 1 : -1;
+  } else {
+    moveY = dy > 0 ? 1 : -1;
+  }
+
+  const targetX = Math.round(player.x) + moveX;
+  const targetY = Math.round(player.y) + moveY;
+
+  if (targetX < 0 || targetX >= WORLD_SIZE || targetY < 0 || targetY >= WORLD_SIZE) {
+    const cardDir = getCardinalDirection(dx, dy);
+    player.targetDirection = cardDir;
+    const diff = Math.abs(angleDifference(player.direction, cardDir));
+    if (diff > 0.1) {
+      player.isRotating = true;
+    } else {
+      player.direction = cardDir;
+    }
+    return;
+  }
+
+  const tile = world[targetX][targetY];
+
+  if (tile.isWalkable) {
+    player.prevTileX = Math.round(player.x);
+    player.prevTileY = Math.round(player.y);
+    player.targetX = targetX;
+    player.targetY = targetY;
+    player.targetDirection = Math.atan2(moveY, moveX);
+    const diff = Math.abs(angleDifference(player.direction, player.targetDirection));
+    if (diff > 0.1) {
+      player.isRotating = true;
+    } else {
+      player.direction = player.targetDirection;
+      GameState.isMoving = true;
+      player.isMoving = true;
+    }
+  } else if (tile.type === 'tree') {
+    player.targetDirection = Math.atan2(moveY, moveX);
+    const diff = Math.abs(angleDifference(player.direction, player.targetDirection));
+    if (diff > 0.1) {
+      player.isRotating = true;
+    } else {
+      player.direction = player.targetDirection;
+      if (chopCooldown <= 0) {
+        const faceX = targetX + 0.5 - player.x;
+        const faceY = targetY + 0.5 - player.y;
+        const dist = Math.sqrt(faceX * faceX + faceY * faceY);
+        tile.damage(new THREE.Vector3(faceX / dist, 0, faceY / dist));
+        GameState.chopCooldown = 300;
+      }
+    }
+  } else {
+    const cardDir = getCardinalDirection(dx, dy);
+    player.targetDirection = cardDir;
+    const diff = Math.abs(angleDifference(player.direction, cardDir));
+    if (diff > 0.1) {
+      player.isRotating = true;
+    } else {
+      player.direction = cardDir;
+    }
+  }
 }
 
 function onWindowResize(): void {
@@ -377,7 +582,6 @@ function updatePlayer(deltaTime: number): void {
             player.direction = player.targetDirection;
           }
 
-          // Try to chop tree
           if (!player.isRotating && GameState.chopCooldown <= 0 && tile.type === 'tree') {
             const dx = tile.x + 0.5 - player.x;
             const dy = tile.y + 0.5 - player.y;
@@ -387,6 +591,8 @@ function updatePlayer(deltaTime: number): void {
           }
         }
       }
+    } else if (GameState.isMouseDown) {
+      initiateActionAtHoveredTile();
     }
   }
 
@@ -468,7 +674,7 @@ function update(deltaTime: number, time: number): void {
   updateEntities(deltaTime, time);
 }
 
-function render(time: number): void {
+function render(_time: number): void {
   const { scene, camera, renderer, fps, fpsElement } = GameState;
   if (!scene || !camera || !renderer) return;
 
@@ -553,7 +759,23 @@ async function init(): Promise<void> {
   const spawnPos = getSpawnPosition(GameState.world);
   GameState.player = createPlayer(scene, spawnPos.x, spawnPos.y);
   
-  // Create highlight mesh (same pattern as original game.ts)
+  // Create hover highlight mesh
+  const hoverHighlightMesh = gameHighlightModel!.clone();
+  hoverHighlightMesh.visible = false;
+  hoverHighlightMesh.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.material = new THREE.MeshBasicMaterial({ 
+        color: WALKABLE_HOVER_HIGHLIGHT_COLOR, 
+        transparent: true, 
+        opacity: HOVER_HIGHLIGHT_OPACITY 
+      });
+    }
+  });
+  scene.add(hoverHighlightMesh);
+  GameState.hoverHighlightMesh = hoverHighlightMesh;
+
+  // Create player highlight mesh
   const highlightMesh = gameHighlightModel!.clone();
   highlightMesh.position.y = 0.02;
   highlightMesh.traverse((child) => {

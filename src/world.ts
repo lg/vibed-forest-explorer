@@ -283,22 +283,21 @@ function createGridLines(scene: THREE.Scene): void {
   const material = new THREE.LineBasicMaterial({
     color: COLORS.gridLine,
     transparent: true,
-    opacity: 0.15,
-    depthTest: false
+    opacity: 0.15
   });
 
   for (let i = 0; i <= WORLD_SIZE; i++) {
     const xPoints = [
-      new THREE.Vector3(0, 0.01, i),
-      new THREE.Vector3(WORLD_SIZE, 0.01, i)
+      new THREE.Vector3(i, 0.1, 0),
+      new THREE.Vector3(i, 0.1, WORLD_SIZE)
     ];
     const xGeometry = new THREE.BufferGeometry().setFromPoints(xPoints);
     const xLine = new THREE.Line(xGeometry, material);
     scene.add(xLine);
 
     const zPoints = [
-      new THREE.Vector3(i, 0.01, 0),
-      new THREE.Vector3(i, 0.01, WORLD_SIZE)
+      new THREE.Vector3(0, 0.1, i),
+      new THREE.Vector3(WORLD_SIZE, 0.1, i)
     ];
     const zGeometry = new THREE.BufferGeometry().setFromPoints(zPoints);
     const zLine = new THREE.Line(zGeometry, material);
