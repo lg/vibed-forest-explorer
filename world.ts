@@ -178,7 +178,7 @@ function createCloud(scene: THREE.Scene, yBase: number): Cloud {
   const mesh = createCloudMesh();
   const x = Math.random() * WORLD_SIZE * 1.5 - WORLD_SIZE * 0.25;
   const z = Math.random() * WORLD_SIZE;
-  mesh.position.set(x, yBase + Math.random() * 4, z);
+  mesh.position.set(x, yBase + Math.random() * 2, z);
   scene.add(mesh);
 
   return {
@@ -197,7 +197,7 @@ function createCloud(scene: THREE.Scene, yBase: number): Cloud {
 function initClouds(scene: THREE.Scene): Cloud[] {
   const clouds: Cloud[] = [];
   const count = 4 + Math.floor(Math.random() * 4);
-  const yBase = 8;
+  const yBase = 3;
 
   for (let i = 0; i < count; i++) {
     clouds.push(createCloud(scene, yBase));
