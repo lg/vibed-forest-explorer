@@ -491,7 +491,7 @@ function initThreeJS(): void {
 
   const container = document.getElementById('game-container');
   if (container) {
-    container.insertBefore(renderer.domElement, container.firstChild);
+    container.appendChild(renderer.domElement);
   }
 
   setupOrbitControls();

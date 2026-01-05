@@ -20,6 +20,10 @@ body {
 
 canvas {
   display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
 }
 
 #ui {
@@ -30,6 +34,10 @@ canvas {
   font-size: 14px;
   text-shadow: 2px 2px 0 #000;
   pointer-events: none;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 #instructions {
@@ -41,4 +49,29 @@ canvas {
   font-size: 12px;
   text-shadow: 1px 1px 0 #000;
   pointer-events: none;
+  z-index: 5;
+}
+
+#github-link {
+  all: initial;
+  font-family: 'Courier New', monospace;
+  color: #3b82f6;
+  font-size: 16px;
+  cursor: pointer;
+  text-shadow: 1px 1px 0 #000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+
+#github-link svg {
+  filter: drop-shadow(1px 1px 0 #000);
+}
+
+#github-link:hover {
+  text-decoration: underline;
 }
