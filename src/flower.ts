@@ -38,8 +38,8 @@ let flowerFlowerModel: THREE.Group | null = null;
 async function loadFlowerModel(): Promise<void> {
   if (!flowerFlowerModel) {
     [flowerGrassModel, flowerFlowerModel] = await Promise.all([
-      loadModel('models/grass.glb'),
-      loadModel('models/flower.glb')
+      loadModel('meshes/grass.glb'),
+      loadModel('meshes/flower.glb')
     ]);
   }
 }

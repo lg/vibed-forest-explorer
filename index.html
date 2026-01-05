@@ -27,10 +27,10 @@
   </div>
   <script>
     const files = [
-      'utils.ts',
-      'grass.ts', 'water.ts', 'path.ts',
-      'flower.ts', 'tree.ts', 'rock.ts',
-      'player.ts', 'world.ts', 'game.ts'
+      'src/utils.ts',
+      'src/grass.ts', 'src/water.ts', 'src/path.ts',
+      'src/flower.ts', 'src/tree.ts', 'src/rock.ts',
+      'src/player.ts', 'src/world.ts', 'src/game.ts'
     ];
 
     Promise.all(files.map(f => fetch(f).then(r => r.text())))

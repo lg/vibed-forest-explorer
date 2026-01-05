@@ -22,7 +22,7 @@ let grassModel: THREE.Group | null = null;
 
 async function loadGrassModel(): Promise<void> {
   if (!grassModel) {
-    grassModel = await loadModel('models/grass.glb');
+    grassModel = await loadModel('meshes/grass.glb');
   }
 }
 

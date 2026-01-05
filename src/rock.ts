@@ -33,8 +33,8 @@ let rockRockModel: THREE.Group | null = null;
 async function loadRockModel(): Promise<void> {
   if (!rockRockModel) {
     [rockGrassModel, rockRockModel] = await Promise.all([
-      loadModel('models/grass.glb'),
-      loadModel('models/rock.glb')
+      loadModel('meshes/grass.glb'),
+      loadModel('meshes/rock.glb')
     ]);
   }
 }

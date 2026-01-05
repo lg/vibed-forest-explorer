@@ -9,7 +9,7 @@ declare const THREE: typeof import('three');
 let gameHighlightModel: THREE.Group | null = null;
 
 async function loadGameHighlightModel(): Promise<void> {
-  gameHighlightModel = await loadModel('models/highlight.glb');
+  gameHighlightModel = await loadModel('meshes/highlight.glb');
 }
 
 // ============================================================================

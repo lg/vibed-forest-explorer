@@ -1,4 +1,4 @@
-// Water tile - not walkable
+// Path tile - walkable dirt path
 
 declare const THREE: typeof import('three');
 
@@ -6,23 +6,23 @@ declare const THREE: typeof import('three');
 // INTERFACE
 // ============================================================================
 
-interface Water {
-  type: 'water';
+interface Path {
+  type: 'path';
   mesh: THREE.Group;
   x: number;
   y: number;
-  isWalkable: false;
+  isWalkable: true;
 }
 
 // ============================================================================
 // MODEL
 // ============================================================================
 
-let waterModel: THREE.Group | null = null;
+let pathModel: THREE.Group | null = null;
 
-async function loadWaterModel(): Promise<void> {
-  if (!waterModel) {
-    waterModel = await loadModel('models/water.glb');
+async function loadPathModel(): Promise<void> {
+  if (!pathModel) {
+    pathModel = await loadModel('meshes/path.glb');
   }
 }
 
@@ -30,11 +30,11 @@ async function loadWaterModel(): Promise<void> {
 // FACTORY
 // ============================================================================
 
-function createWater(scene: THREE.Scene, x: number, y: number): Water {
-  const mesh = waterModel!.clone();
+function createPath(scene: THREE.Scene, x: number, y: number): Path {
+  const mesh = pathModel!.clone();
   positionTileMesh(mesh, x, y);
   enableShadowReceive(mesh);
   scene.add(mesh);
 
-  return { type: 'water', mesh, x, y, isWalkable: false };
+  return { type: 'path', mesh, x, y, isWalkable: true };
 }

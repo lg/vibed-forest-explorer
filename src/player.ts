@@ -48,11 +48,11 @@ var playerModel: THREE.Group | null = null;
 var highlightModel: THREE.Group | null = null;
 
 async function loadPlayerModel(): Promise<void> {
-  playerModel = await loadModel('models/player.glb');
+  playerModel = await loadModel('meshes/player.glb');
 }
 
 async function loadHighlightModel(): Promise<void> {
-  highlightModel = await loadModel('models/highlight.glb');
+  highlightModel = await loadModel('meshes/highlight.glb');
 }
 
 // ============================================================================

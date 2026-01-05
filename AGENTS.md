@@ -2,6 +2,10 @@
 
 This file provides guidance for AI coding agents working in this repository.
 
+## IMPORTANT: No Automatic Git Operations
+
+**NEVER automatically commit or push changes.** Always ask the user to commit and push manually. This ensures the user has full control over their git history and can review changes before committing.
+
 ## Project Overview
 
 This is a browser-based 3D forest exploration game built with TypeScript and Three.js.
@@ -48,21 +52,24 @@ declare const THREE: typeof import('three');
 
 ### 3D Models
 
-The game loads `.glb` models from the `models/` directory using `GLTFLoader`:
-- Models are loaded asynchronously in `loadModels()` and cached in `modelCache`
+The game loads `.glb` models from the `meshes/` directory using `GLTFLoader`:
+- Models are loaded asynchronously and cached per entity type
 - GLTFLoader is imported as an ES module via the import map in `index.html`
 - Loaded models are cloned for each instance (trees, rocks, flowers, player)
 - Model names should match file names: `tree.glb`, `rock.glb`, `flower.glb`, `player.glb`
 
 Example model loading:
 ```typescript
-async function loadModels(): Promise<void> {
+async function loadModel(path: string): Promise<THREE.Group> {
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const loader = new (GLTFLoader as any)();
-  loader.load(`models/${name}.glb`, (gltf: any) => {
-    modelCache[name] = gltf.scene;
+  return new Promise((resolve, reject) => {
+    loader.load(path, (gltf: any) => resolve(gltf.scene), undefined, reject);
   });
 }
+
+// Usage in entity files:
+grassModel = await loadModel('meshes/grass.glb');
 ```
 
 ## Build/Lint/Test Commands
@@ -80,7 +87,7 @@ bun install
 bunx oxlint . --ignore-path .gitignore
 
 # Lint a specific file
-bunx oxlint game.ts
+bunx oxlint src/game.ts
 ```
 
 ### Running the Game
@@ -93,8 +100,8 @@ bunx serve .
 
 ### No Build Step Required
 
-The project uses in-browser TypeScript transpilation via Babel. The `game.ts`
-file is fetched and transpiled at runtime in `index.html`.
+The project uses in-browser TypeScript transpilation via Babel. TypeScript files
+in the `src/` folder are fetched and transpiled at runtime in `index.html`.
 
 **IMPORTANT**: Do NOT introduce any build steps, bundlers, or precompilation.
 The architecture must remain: serve files → browser fetches `.ts` → Babel transpiles → runs.
@@ -103,10 +110,16 @@ The architecture must remain: serve files → browser fetches `.ts` → Babel tr
 
 ### File Organization
 
-- `game.ts` - Main game logic (single-file architecture)
+- `src/` - TypeScript source files
+  - `game.ts` - Main game loop and state management
+  - `utils.ts` - Helper functions and model loading
+  - `world.ts` - World generation, clouds, pollen particles
+  - `player.ts` - Player entity
+  - `grass.ts`, `water.ts`, `path.ts` - Ground tile types
+  - `flower.ts`, `tree.ts`, `rock.ts` - Decoration tile types
 - `index.html` - Entry point, loads and transpiles TypeScript
 - `style.css` - Game styling
-- `models/` - Directory containing `.glb` 3D model files
+- `meshes/` - Directory containing `.glb` 3D model files
 
 ### TypeScript Conventions
 
@@ -232,7 +245,7 @@ The game uses `requestAnimationFrame` for the main loop:
 
 ### 3D Models
 
-All game objects use `.glb` models loaded from the `models/` directory:
+All game objects use `.glb` models loaded from the `meshes/` directory:
 - **Trees**: Loaded from `tree.glb` - variants distinguished by color
 - **Rocks**: Loaded from `rock.glb` - mossy variants exist
 - **Flowers**: Loaded from `flower.glb` - 4 color variants

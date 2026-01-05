@@ -46,8 +46,8 @@ let treeTreeModel: THREE.Group | null = null;
 async function loadTreeModel(): Promise<void> {
   if (!treeTreeModel) {
     [treeGrassModel, treeTreeModel] = await Promise.all([
-      loadModel('models/grass.glb'),
-      loadModel('models/tree.glb')
+      loadModel('meshes/grass.glb'),
+      loadModel('meshes/tree.glb')
     ]);
   }
 }

@@ -161,7 +161,7 @@ let worldCloudModels: THREE.Group[] = [];
 async function loadCloudModels(): Promise<void> {
   if (worldCloudModels.length === 0) {
     const names = ['cloud1', 'cloud2', 'cloud3'];
-    worldCloudModels = await Promise.all(names.map(name => loadModel(`models/${name}.glb`)));
+    worldCloudModels = await Promise.all(names.map(name => loadModel(`meshes/${name}.glb`)));
   }
 }
 
